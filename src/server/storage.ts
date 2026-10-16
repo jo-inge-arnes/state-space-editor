@@ -1,6 +1,5 @@
 import "server-only";
 
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { connection } from "next/server";
 import {
@@ -12,61 +11,60 @@ import {
   type ProblemDocument,
 } from "@/model/schema";
 import type { StoredEntry } from "@/model/storageTypes";
+import { fileSystemBackend } from "./backends/fileSystem";
+import { StorageError, type Kind, type StorageBackend } from "./backends/types";
+import { vercelBlobBackend } from "./backends/vercelBlob";
 
 /**
- * File-based JSON store: data/graphs/<id>.json and data/problems/<id>.json.
- * Files hold the full documents (core + derived values). User-defined function
- * sources are stored as text only and never executed on the server.
+ * JSON document store for graphs and problems. Documents hold the full data
+ * (core + derived values). User-defined function sources are stored as text
+ * only and never executed on the server.
+ *
+ * Backend: Vercel Blob when a Blob store is connected (as on Vercel, whose file
+ * system is read-only), otherwise local files in ./data.
  */
-// Runtime data, not part of the build output (hence the turbopackIgnore hint).
-const DATA_DIR = process.env.STATE_SPACE_DATA_DIR ?? path.join(/* turbopackIgnore: true */ process.cwd(), "data");
+const backend: StorageBackend = blobConfigured()
+  ? vercelBlobBackend(process.env.STATE_SPACE_BLOB_ACCESS === "public" ? "public" : "private")
+  : // Runtime data, not part of the build output (hence the turbopackIgnore hint).
+    fileSystemBackend(process.env.STATE_SPACE_DATA_DIR ?? path.join(/* turbopackIgnore: true */ process.cwd(), "data"));
 
-type Kind = "graphs" | "problems";
+function blobConfigured(): boolean {
+  const choice = process.env.STATE_SPACE_STORAGE;
+  if (choice === "blob") return true;
+  if (choice === "fs") return false;
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+}
 
 export type { StoredEntry };
+export { StorageError };
 
-export class StorageError extends Error {}
-
-function fileFor(kind: Kind, id: string): string {
+function checkId(id: string): string {
   if (!ID_PATTERN.test(id)) throw new StorageError(`Invalid id "${id}"`);
-  return path.join(DATA_DIR, kind, `${id}.json`);
+  return id;
 }
 
 async function readJson(kind: Kind, id: string): Promise<unknown | null> {
-  await connection(); // always read fresh from disk at request time
-  try {
-    return JSON.parse(await readFile(fileFor(kind, id), "utf8"));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
+  await connection(); // always read fresh at request time
+  const text = await backend.read(kind, checkId(id));
+  return text === null ? null : JSON.parse(text);
 }
 
 async function writeJson(kind: Kind, id: string, data: unknown): Promise<void> {
-  const file = fileFor(kind, id);
-  await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2) + "\n", "utf8");
-  await rename(tmp, file); // atomic replace
+  await backend.write(kind, checkId(id), JSON.stringify(data, null, 2) + "\n");
 }
 
 async function list(kind: Kind): Promise<StoredEntry[]> {
   await connection();
-  const dir = path.join(DATA_DIR, kind);
-  let files: string[];
-  try {
-    files = (await readdir(dir)).filter((f) => f.endsWith(".json"));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
+  const ids = (await backend.list(kind)).filter((id) => ID_PATTERN.test(id));
   const entries = await Promise.all(
-    files.map(async (f): Promise<StoredEntry | null> => {
+    ids.map(async (id): Promise<StoredEntry | null> => {
       try {
-        const raw = JSON.parse(await readFile(path.join(dir, f), "utf8"));
+        const text = await backend.read(kind, id);
+        if (text === null) return null;
+        const raw = JSON.parse(text);
         return {
-          id: String(raw.id ?? f.replace(/\.json$/, "")),
-          name: String(raw.name ?? raw.id ?? f),
+          id: String(raw.id ?? id),
+          name: String(raw.name ?? raw.id ?? id),
           updatedAt: String(raw.updatedAt ?? ""),
           ...(raw.graphId ? { graphId: String(raw.graphId) } : {}),
         };
@@ -115,9 +113,9 @@ export async function writeProblem(input: unknown): Promise<ProblemDocument> {
 }
 
 export async function deleteGraph(id: string): Promise<void> {
-  await rm(fileFor("graphs", id), { force: true });
+  await backend.remove("graphs", checkId(id));
 }
 
 export async function deleteProblem(id: string): Promise<void> {
-  await rm(fileFor("problems", id), { force: true });
+  await backend.remove("problems", checkId(id));
 }

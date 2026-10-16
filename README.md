@@ -20,7 +20,27 @@ npm test           # unit tests (Vitest)
 npm run build && npm start
 ```
 
-Saved files are written to `data/graphs/*.json` and `data/problems/*.json` (change with `STATE_SPACE_DATA_DIR`).
+Locally, saved files are written to `data/graphs/*.json` and `data/problems/*.json` (change with `STATE_SPACE_DATA_DIR`).
+
+## Deploying on Vercel
+
+Vercel's server file system is read-only, so on Vercel the app stores files in **Vercel Blob** instead:
+
+1. In the Vercel dashboard, open the project → **Storage** → **Create** → **Blob**, and connect the store to the project.
+   Vercel then sets the store's credentials (`BLOB_READ_WRITE_TOKEN`) as environment variables.
+2. Redeploy. The app uses Blob automatically whenever those credentials are present.
+
+Files are kept as private blobs named `graphs/<id>.json` and `problems/<id>.json`.
+
+| Variable | Effect |
+| --- | --- |
+| `STATE_SPACE_STORAGE` | `blob` or `fs` to force a backend (default: Blob if credentials exist, else files) |
+| `STATE_SPACE_BLOB_ACCESS` | `private` (default) or `public`, matching your Blob store |
+| `STATE_SPACE_DATA_DIR` | Folder for the file backend (default `./data`) |
+
+To use the Blob store when running locally, run `vercel env pull .env.local` (Vercel CLI).
+
+There is no login: anyone who can open the deployment can save, overwrite and delete files.
 
 ## Editor
 
@@ -69,6 +89,6 @@ Everything (UI, export) goes through `computeHeuristicTable` / `evaluateGraph`, 
 src/model/        schema (zod), geometry, cost models, heuristics, actions, serialization
 src/state/        editor reducer
 src/components/   client components: Canvas (SVG), Inspector, panels, FunctionEditor
-src/server/       file storage (server-only)
+src/server/       storage (server-only): file-system and Vercel Blob backends
 src/app/          pages (Server Components), Server Actions, Route Handlers
 ```
