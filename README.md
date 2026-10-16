@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# State-Space Editor
 
-## Getting Started
+A visual editor for state-space graphs for classical AI search in fully observable, deterministic, known environments.
+Built with Next.js 16 (App Router, Cache Components), React 19 and TypeScript.
 
-First, run the development server:
+- **States** are nodes with atomic, editable names. **Actions** are edges (two-way by default, or one-way).
+- **Step costs** come from a pluggable cost model: Euclidean length × friction (default), manual per-edge costs,
+  unit cost, or your own JavaScript function.
+- **Problems** are an initial state, a goal state and a pluggable **heuristic**: straight-line distance, Manhattan, zero,
+  manual per-node values, or your own function. The editor shows the estimate h(n) for each state.
+- **Scale:** `pxPerUnit` (default 100 px = 1 unit = one grid square). Euclidean costs and straight-line heuristics use
+  the same units.
+
+## Running
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
+npm test           # unit tests (Vitest)
+npm run build && npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Saved files are written to `data/graphs/*.json` and `data/problems/*.json` (change with `STATE_SPACE_DATA_DIR`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Editor
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Key | Action |
+| --- | --- |
+| `V` | Select / move (drag states, drag background to pan, wheel to zoom) |
+| `N` | Add states (click empty canvas) |
+| `E` | Add actions (click source state, then target state) |
+| `Del` | Delete selection |
+| `Esc` | Cancel |
+| Double-click a state | Rename |
 
-## Learn More
+## JSON files
 
-To learn more about Next.js, take a look at the following resources:
+Graph and problem files contain the core data plus a `derived` block computed by the editor, for search code to read
+directly: edge `length`, `cost` / `reverseCost`, the `actions` map (`ACTIONS(s)` with costs), and for problems the
+heuristic table `h` (estimated cost to the goal per state). On load, the editor ignores
+`derived` and recomputes it. Exported problem files embed their graph; problems on the server reference it by `graphId`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+HTTP API: `GET /api` (index), `GET /api/graphs/<id>`, `GET /api/problems/<id>` (add `?download=1` to download).
+Writes go through Server Actions in `src/app/actions.ts`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Adding cost models and heuristics
 
-## Deploy on Vercel
+Users can write functions in the editor ("Custom function…"); the source is stored in the JSON and only executed in the
+browser, never on the server.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+To add a permanent built-in, add an object to `src/model/costs/builtins.ts` or `src/model/heuristics/builtins.ts` and
+register it in the list in the matching `registry.ts`:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```ts
+// src/model/heuristics/builtins.ts
+export const halfStraightLine: Heuristic = {
+  id: "half-straight-line",
+  label: "½ straight-line",
+  description: "Half the air distance to the goal.",
+  h: (node, ctx) => ctx.euclidean(node, ctx.goal) / 2,
+};
+```
+
+Everything (UI, export) goes through `computeHeuristicTable` / `evaluateGraph`, so new entries work everywhere.
+
+## Layout
+
+```
+src/model/        schema (zod), geometry, cost models, heuristics, actions, serialization
+src/state/        editor reducer
+src/components/   client components: Canvas (SVG), Inspector, panels, FunctionEditor
+src/server/       file storage (server-only)
+src/app/          pages (Server Components), Server Actions, Route Handlers
+```

@@ -1,0 +1,160 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useReducer, useState, type ReactNode } from "react";
+import { evaluateGraph } from "@/model/actions";
+import { computeHeuristicTable } from "@/model/heuristics/registry";
+import type { Problem, StateSpaceGraph } from "@/model/schema";
+import { parseGraph, parseProblem } from "@/model/serialize";
+import { editorReducer, initialEditorState, sampleState } from "@/state/editorReducer";
+import Canvas from "./Canvas";
+import CostModelPanel from "./CostModelPanel";
+import Inspector from "./Inspector";
+import ProblemPanel from "./ProblemPanel";
+import StoragePanel from "./StoragePanel";
+import Toolbar from "./Toolbar";
+import TransitionPanel from "./TransitionPanel";
+import styles from "./Editor.module.css";
+
+const AUTOSAVE_KEY = "state-space-editor:autosave";
+
+interface Props {
+  /** Graph/problem opened from server storage via the URL; otherwise the autosave or an example is used. */
+  initialGraph?: StateSpaceGraph;
+  initialProblem?: Problem;
+  loadError?: string;
+}
+
+export default function Editor({ initialGraph, initialProblem, loadError }: Props) {
+  const [state, dispatch] = useReducer(editorReducer, undefined, () => {
+    if (initialGraph) return initialEditorState(initialGraph, initialProblem);
+    const sample = sampleState();
+    return initialEditorState(sample.graph, sample.problem);
+  });
+  const [showH, setShowH] = useState(true);
+  const [snap, setSnap] = useState(false);
+  const [renameRequest, setRenameRequest] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false);
+
+  // Restore the browser autosave (only when nothing was opened from the server).
+  useEffect(() => {
+    if (!initialGraph) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(AUTOSAVE_KEY) ?? "null");
+        const g = saved && parseGraph(saved.graph);
+        if (g?.ok) {
+          const p = saved.problem ? parseProblem(saved.problem) : null;
+          dispatch({ type: "load", graph: g.value, problem: p?.ok ? p.value.problem : undefined, dirty: !!saved.dirty });
+        }
+      } catch {
+        // Storage unavailable or corrupt: start from the example.
+      }
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time flag after reading browser storage
+    setRestored(true);
+  }, [initialGraph]);
+
+  // Autosave the working copy in this browser.
+  useEffect(() => {
+    if (!restored) return;
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          AUTOSAVE_KEY,
+          JSON.stringify({ graph: state.graph, problem: state.problem, dirty: state.dirty }),
+        );
+      } catch {
+        // ignore quota / privacy-mode errors
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [state.graph, state.problem, state.dirty, restored]);
+
+  // Keyboard shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTextEntry(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "v") dispatch({ type: "setMode", mode: "select" });
+      else if (k === "n") dispatch({ type: "setMode", mode: "add-node" });
+      else if (k === "e") dispatch({ type: "setMode", mode: "add-edge" });
+      else if (k === "escape") {
+        dispatch({ type: "setPendingEdge", from: null });
+        dispatch({ type: "select", selection: null });
+      } else if (k === "delete" || k === "backspace") {
+        e.preventDefault();
+        dispatch({ type: "deleteSelection" });
+      } else return;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const evaluated = useMemo(() => evaluateGraph(state.graph), [state.graph]);
+  const heuristic = useMemo(
+    () => (state.graph.nodes.length ? computeHeuristicTable(state.graph, state.problem, evaluated) : null),
+    [state.graph, state.problem, evaluated],
+  );
+  const onRequestRename = useCallback((id: string) => {
+    dispatch({ type: "select", selection: { kind: "node", id } });
+    setRenameRequest(id);
+  }, []);
+  const onRenameHandled = useCallback(() => setRenameRequest(null), []);
+
+  const shared = { state, dispatch, evaluated };
+  const selectionTitle =
+    state.selection?.kind === "node" ? "State" : state.selection?.kind === "edge" ? "Action (edge)" : "Selection";
+
+  return (
+    <div className={styles.shell}>
+      <Toolbar state={state} dispatch={dispatch} showH={showH} setShowH={setShowH} snap={snap} setSnap={setSnap} />
+      <div className={styles.main}>
+        <Canvas
+          {...shared}
+          heuristic={heuristic}
+          showH={showH}
+          snap={snap}
+          onRequestRename={onRequestRename}
+        />
+        <aside className={styles.sidebar}>
+          {loadError && <p className={styles.error} style={{ padding: "10px 14px" }}>{loadError}</p>}
+          <Section title={selectionTitle}>
+            <Inspector
+              {...shared}
+              heuristic={heuristic}
+                  renameRequest={renameRequest}
+              onRenameHandled={onRenameHandled}
+            />
+          </Section>
+          <Section title="Problem & heuristic">
+            <ProblemPanel state={state} dispatch={dispatch} heuristic={heuristic} />
+          </Section>
+          <Section title="Step costs & scale">
+            <CostModelPanel {...shared} />
+          </Section>
+          <Section title="Transition model" open={false}>
+            <TransitionPanel {...shared} />
+          </Section>
+          <Section title="Save & load">
+            <StoragePanel {...shared} />
+          </Section>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/** Keyboard shortcuts are suppressed while typing, but not on checkboxes or buttons. */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  return target instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "reset", "file"].includes(target.type);
+}
+
+function Section({ title, open = true, children }: { title: string; open?: boolean; children: ReactNode }) {
+  return (
+    <details className={styles.section} open={open}>
+      <summary>{title}</summary>
+      {children}
+    </details>
+  );
+}

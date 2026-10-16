@@ -1,0 +1,391 @@
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100dvh;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text);
+  margin-right: 4px;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.modeActive {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.dirty {
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  min-height: 0;
+}
+
+@media (max-width: 860px) {
+  .main {
+    grid-template-columns: 1fr;
+    grid-template-rows: 60vh auto;
+    overflow-y: auto;
+  }
+}
+
+/* ---- Canvas ---- */
+
+.canvasWrap {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--canvas-bg);
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+}
+
+.canvas[data-mode="add-node"] {
+  cursor: crosshair;
+}
+.canvas[data-mode="add-edge"] {
+  cursor: cell;
+}
+.canvas[data-panning="true"] {
+  cursor: grabbing;
+}
+
+.gridMinor {
+  stroke: var(--grid-minor);
+}
+.gridMajor {
+  stroke: var(--grid-major);
+}
+
+.edgeLine {
+  stroke: var(--edge);
+  stroke-width: 2;
+  fill: none;
+}
+.edgeFriction {
+  stroke-dasharray: 7 4;
+}
+.edgeHit {
+  stroke: transparent;
+  stroke-width: 14;
+  cursor: pointer;
+}
+.edgeSelected .edgeLine {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.edgeError .edgeLine {
+  stroke: var(--danger);
+}
+.arrow {
+  fill: var(--edge);
+}
+.arrowSelected {
+  fill: var(--accent);
+}
+.arrowError {
+  fill: var(--danger);
+}
+
+.edgeLabel {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  fill: var(--edge-label);
+  stroke: var(--canvas-bg);
+  stroke-width: 4px;
+  paint-order: stroke;
+  stroke-linejoin: round;
+  cursor: pointer;
+}
+.edgeLabelError {
+  fill: var(--danger);
+}
+
+.node {
+  cursor: grab;
+}
+.nodeCircle {
+  fill: var(--node-fill);
+  stroke: var(--node-stroke);
+  stroke-width: 2;
+}
+.nodeSelected .nodeCircle {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.nodePending .nodeCircle {
+  stroke: var(--accent);
+  stroke-dasharray: 4 3;
+  stroke-width: 3;
+}
+.nodeName {
+  font-size: 13px;
+  font-weight: 600;
+  fill: var(--text);
+  pointer-events: none;
+}
+.ringInitial {
+  fill: none;
+  stroke: var(--initial);
+  stroke-width: 3;
+  pointer-events: none;
+}
+.ringGoal {
+  fill: none;
+  stroke: var(--goal);
+  stroke-width: 3;
+  pointer-events: none;
+}
+.roleLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.hLabel {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  fill: var(--muted);
+  stroke: var(--canvas-bg);
+  stroke-width: 3px;
+  paint-order: stroke;
+  pointer-events: none;
+}
+.hLabelBad {
+  fill: var(--danger);
+}
+.rubberBand {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+.overlay {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.scaleBar {
+  height: 6px;
+  border: 2px solid var(--muted);
+  border-top: none;
+}
+.hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.zoomControls {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 4px;
+}
+
+/* ---- Sidebar ---- */
+
+.sidebar {
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.section {
+  border-bottom: 1px solid var(--border);
+}
+.section > summary {
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  list-style-position: inside;
+}
+.sectionBody {
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.field > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 0;
+}
+.okText {
+  color: var(--ok);
+}
+.warnText {
+  color: var(--warn);
+}
+
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.table td.num {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+.table input {
+  width: 72px;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.rowSelected {
+  background: var(--accent-soft);
+}
+
+.actionsList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.actionsList li {
+  padding: 2px 0;
+}
+
+.code {
+  width: 100%;
+  min-height: 150px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+  tab-size: 2;
+  white-space: pre;
+}
+.signature {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fileList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fileList li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fileList li > span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fileList button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.status {
+  font-size: 13px;
+  margin: 0;
+}
