@@ -6,11 +6,15 @@ import type { HeuristicTable } from "@/model/heuristics/registry";
 import type { Edge, StateNode } from "@/model/schema";
 import type { EditorAction, EditorState } from "@/state/editorReducer";
 import { formatNumber } from "./format";
+import { useCoarsePointer } from "./useCoarsePointer";
 import styles from "./Editor.module.css";
 
 const R = 22; // node radius in px
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 4;
+/** Pointer travel (px) below which a press counts as a tap rather than a drag. */
+const TAP_SLOP = 6;
+const DOUBLE_TAP_MS = 350;
 
 interface View {
   x: number;
@@ -18,10 +22,16 @@ interface View {
   zoom: number;
 }
 
+/** What a press on empty canvas does if it ends without moving. */
+type TapAction = "add-node" | "cancel-edge" | "deselect" | null;
+
 type Drag =
-  | { kind: "node"; id: string; dx: number; dy: number }
-  | { kind: "pan"; clientX: number; clientY: number; view: View }
+  | { kind: "node"; id: string; dx: number; dy: number; clientX: number; clientY: number; moved: boolean }
+  | { kind: "pan"; clientX: number; clientY: number; view: View; moved: boolean; tap: TapAction }
+  | { kind: "pinch"; dist: number; cx: number; cy: number; view: View }
   | null;
+
+type Point = { x: number; y: number };
 
 interface Props {
   state: EditorState;
@@ -40,15 +50,26 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const [drag, setDrag] = useState<Drag>(null);
-  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const [cursor, setCursor] = useState<Point | null>(null);
+  const coarse = useCoarsePointer();
+  // Active pointers in client coordinates, for two-finger pinch/pan.
+  const pointers = useRef(new Map<number, Point>());
+  const lastTap = useRef<{ id: string; t: number } | null>(null);
 
   // Track the canvas size so the viewBox keeps a 1:1 pixel ratio at zoom 1.
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    let prev: { w: number; h: number } | null = null;
     const ro = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      setSize({ w: Math.max(1, width), h: Math.max(1, height) });
+      const next = { w: Math.max(1, entry.contentRect.width), h: Math.max(1, entry.contentRect.height) };
+      // Keep the centre of the view in place, e.g. when the phone's bottom sheet opens or closes.
+      if (prev) {
+        const { w, h } = prev;
+        setView((v) => ({ ...v, x: v.x + (w - next.w) / 2 / v.zoom, y: v.y + (h - next.h) / 2 / v.zoom }));
+      }
+      prev = next;
+      setSize(next);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -69,8 +90,15 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
         return { zoom, x: wx - (e.clientX - rect.left) / zoom, y: wy - (e.clientY - rect.top) / zoom };
       });
     };
+    // The canvas works on pointer events only. Suppress the mouse events and click the browser
+    // synthesises after a touch; they would land on whatever a tap just opened (e.g. the bottom sheet).
+    const onTouchEnd = (e: TouchEvent) => e.preventDefault();
     svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
+    svg.addEventListener("touchend", onTouchEnd, { passive: false });
+    return () => {
+      svg.removeEventListener("wheel", onWheel);
+      svg.removeEventListener("touchend", onTouchEnd);
+    };
   }, []);
 
   const toWorld = (e: { clientX: number; clientY: number }) => {
@@ -90,20 +118,27 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
     if (svg && !svg.hasPointerCapture(e.pointerId)) svg.setPointerCapture(e.pointerId);
   };
 
+  const pinchFrom = (v: View): Drag => {
+    const [a, b] = [...pointers.current.values()];
+    return { kind: "pinch", dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, view: v };
+  };
+
+  // Runs before the node/edge handlers: a second finger turns whatever is going on into a pinch.
+  const onDownCapture = (e: PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType === "mouse") return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      e.stopPropagation();
+      setDrag(pinchFrom(view));
+    } else if (pointers.current.size > 2) e.stopPropagation();
+  };
+
   const onBackgroundDown = (e: PointerEvent<SVGSVGElement>) => {
-    if (e.button === 1 || (e.button === 0 && mode === "select")) {
-      // Pan with the middle button anywhere, or the left button on empty canvas in select mode.
-      if (e.button === 0) dispatch({ type: "select", selection: null });
-      setDrag({ kind: "pan", clientX: e.clientX, clientY: e.clientY, view });
-      return;
-    }
-    if (e.button !== 0) return;
-    if (mode === "add-node") {
-      const p = snapPoint(toWorld(e));
-      dispatch({ type: "addNode", x: p.x, y: p.y });
-    } else if (mode === "add-edge") {
-      dispatch({ type: "setPendingEdge", from: null });
-    }
+    if (e.button !== 0 && e.button !== 1) return;
+    // Empty canvas always pans when dragged; a plain tap/click does the current tool's action.
+    const tap: TapAction =
+      e.button === 1 ? null : mode === "add-node" ? "add-node" : mode === "add-edge" ? "cancel-edge" : "deselect";
+    setDrag({ kind: "pan", clientX: e.clientX, clientY: e.clientY, view, moved: false, tap });
   };
 
   const onNodeDown = (e: PointerEvent, node: StateNode) => {
@@ -116,7 +151,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
     }
     dispatch({ type: "select", selection: { kind: "node", id: node.id } });
     const p = toWorld(e);
-    setDrag({ kind: "node", id: node.id, dx: p.x - node.x, dy: p.y - node.y });
+    setDrag({ kind: "node", id: node.id, dx: p.x - node.x, dy: p.y - node.y, clientX: e.clientX, clientY: e.clientY, moved: false });
   };
 
   const onEdgeDown = (e: PointerEvent, edge: Edge) => {
@@ -127,15 +162,32 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
   };
 
   const onMove = (e: PointerEvent<SVGSVGElement>) => {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const p = toWorld(e);
     setCursor(p);
     if (drag) capture(e);
-    if (drag?.kind === "node") {
+    if (drag?.kind === "pinch") {
+      if (pointers.current.size < 2) return;
+      const [a, b] = [...pointers.current.values()];
+      const rect = svgRef.current!.getBoundingClientRect();
+      const zoom = clamp((drag.view.zoom * Math.hypot(b.x - a.x, b.y - a.y)) / drag.dist, MIN_ZOOM, MAX_ZOOM);
+      // Keep the world point that was under the fingers' midpoint under the new midpoint.
+      const wx = drag.view.x + (drag.cx - rect.left) / drag.view.zoom;
+      const wy = drag.view.y + (drag.cy - rect.top) / drag.view.zoom;
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      setView({ zoom, x: wx - (cx - rect.left) / zoom, y: wy - (cy - rect.top) / zoom });
+    } else if (drag?.kind === "node") {
+      if (!drag.moved && Math.hypot(e.clientX - drag.clientX, e.clientY - drag.clientY) > TAP_SLOP)
+        setDrag({ ...drag, moved: true });
       const target = snapPoint({ x: p.x - drag.dx, y: p.y - drag.dy });
       const node = evaluated.nodeById.get(drag.id);
       if (node && (node.x !== target.x || node.y !== target.y))
         dispatch({ type: "moveNode", id: drag.id, x: target.x, y: target.y });
     } else if (drag?.kind === "pan") {
+      const moved = drag.moved || Math.hypot(e.clientX - drag.clientX, e.clientY - drag.clientY) > TAP_SLOP;
+      if (!moved) return;
+      if (!drag.moved) setDrag({ ...drag, moved: true });
       setView({
         ...drag.view,
         x: drag.view.x - (e.clientX - drag.clientX) / drag.view.zoom,
@@ -144,7 +196,32 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
     }
   };
 
-  const endDrag = () => setDrag(null);
+  const onUp = (e: PointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId);
+    if (drag?.kind === "pan" && !drag.moved) {
+      if (drag.tap === "add-node") {
+        const p = snapPoint(toWorld(e));
+        dispatch({ type: "addNode", x: p.x, y: p.y });
+      } else if (drag.tap === "cancel-edge") dispatch({ type: "setPendingEdge", from: null });
+      else if (drag.tap === "deselect") dispatch({ type: "select", selection: null });
+    }
+    // Touch screens have no reliable dblclick: two taps (no drag) on the same state rename it.
+    if (drag?.kind === "node" && !drag.moved && e.pointerType !== "mouse") {
+      const prev = lastTap.current;
+      if (prev?.id === drag.id && e.timeStamp - prev.t < DOUBLE_TAP_MS) {
+        lastTap.current = null;
+        onRequestRename(drag.id);
+      } else lastTap.current = { id: drag.id, t: e.timeStamp };
+    } else if (drag?.kind === "node") lastTap.current = null;
+    // Lifting one finger of a pinch ends it; the other finger does nothing until lifted.
+    setDrag(null);
+    if (e.pointerType !== "mouse") setCursor(null);
+  };
+
+  const onCancel = (e: PointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId);
+    setDrag(null);
+  };
 
   const zoomBy = (factor: number) =>
     setView((v) => {
@@ -180,10 +257,11 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
         data-mode={mode}
         data-panning={drag?.kind === "pan"}
         viewBox={`${view.x} ${view.y} ${viewW} ${viewH}`}
+        onPointerDownCapture={onDownCapture}
         onPointerDown={onBackgroundDown}
         onPointerMove={onMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+        onPointerUp={onUp}
+        onPointerCancel={onCancel}
         onPointerLeave={() => setCursor(null)}
         aria-label="State-space graph canvas"
         role="application"
@@ -243,6 +321,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
                   <circle r={R + 10} className={styles.ringGoal} strokeWidth={1.5} />
                 </>
               )}
+              <circle r={R + 8} className={styles.nodeHit} />
               <circle r={R} className={styles.nodeCircle} />
               <text className={styles.nodeName} textAnchor="middle" dominantBaseline="central">
                 {truncate(node.name, 6)}
@@ -267,7 +346,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
         })}
       </svg>
 
-      <div className={styles.hint}>{hintFor(state)}</div>
+      <div className={styles.hint}>{hintFor(state, coarse)}</div>
 
       <div className={styles.overlay}>
         <div>
@@ -379,7 +458,17 @@ function edgeLabel(forward: number | null, backward: number | null | undefined):
   return `${f} / ${backward === null ? "?" : formatNumber(backward)}`;
 }
 
-function hintFor(state: EditorState): string {
+function hintFor(state: EditorState, touch: boolean): string {
+  if (touch) {
+    switch (state.mode) {
+      case "add-node":
+        return "Tap to place a state";
+      case "add-edge":
+        return state.pendingEdgeFrom ? "Tap the target state" : "Tap the source state";
+      default:
+        return "Drag to move · pinch to zoom · double-tap to rename";
+    }
+  }
   switch (state.mode) {
     case "add-node":
       return "Click on empty canvas to place a state";

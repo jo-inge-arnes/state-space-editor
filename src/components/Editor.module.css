@@ -63,11 +63,125 @@
   min-height: 0;
 }
 
+.nameInput {
+  width: 180px;
+}
+
+/* Wide/narrow label variants and the bottom-sheet toggle (narrow screens only). */
+.short,
+.newNarrow,
+.sheetToggle {
+  display: none;
+}
+
 @media (max-width: 860px) {
+  .toolbar {
+    gap: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  .toolbar button {
+    padding: 6px 8px;
+  }
+  .long,
+  .newWide,
+  .spacer {
+    display: none;
+  }
+  .short,
+  .newNarrow {
+    display: inline;
+  }
+  .brand {
+    font-size: 18px;
+    padding: 0 4px;
+  }
+  .nameInput {
+    flex: 1 1 0;
+    width: auto;
+  }
+  /* The first separator becomes a line break: name row on top, tools below. */
+  .sep.lineBreak {
+    flex-basis: 100%;
+    height: 0;
+    margin: 0;
+    background: none;
+  }
+  .sep:not(.lineBreak) {
+    display: none;
+  }
+
+  /* Canvas fills the screen; the side panel becomes a bottom sheet. */
   .main {
     grid-template-columns: 1fr;
-    grid-template-rows: 60vh auto;
-    overflow-y: auto;
+    grid-template-rows: 1fr auto;
+  }
+  .sidebar {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
+    max-height: 58dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .sidebar[data-open="false"] {
+    overflow: hidden;
+  }
+  .sidebar[data-open="false"] > :not(.sheetToggle) {
+    display: none;
+  }
+  .sheetToggle {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 14px 16px 10px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--surface);
+    font-weight: 600;
+    text-align: left;
+  }
+  .sheetHandle {
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: 2px;
+    background: var(--border);
+  }
+  .sheetTitle {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hint {
+    max-width: calc(100% - 24px);
+    white-space: normal;
+    text-align: center;
+  }
+  .overlay {
+    bottom: 54px;
+  }
+}
+
+/* Finger-sized targets on touch screens. */
+@media (pointer: coarse) {
+  .edgeHit {
+    stroke-width: 30;
+  }
+  .zoomControls button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .section > summary {
+    padding: 14px 16px;
   }
 }
 
@@ -151,6 +265,9 @@
 
 .node {
   cursor: grab;
+}
+.nodeHit {
+  fill: transparent;
 }
 .nodeCircle {
   fill: var(--node-fill);

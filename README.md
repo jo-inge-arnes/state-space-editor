@@ -53,6 +53,10 @@ There is no login: anyone who can open the deployment can save, overwrite and de
 | `Esc` | Cancel |
 | Double-click a state | Rename |
 
+On phones and tablets the side panel becomes a bottom sheet (tap its bar to open or close it). Touch controls: drag a
+state to move it, drag empty canvas to pan (in every tool), pinch to zoom, tap with **+State** / **+Action** to add,
+and double-tap a state to rename it.
+
 ## JSON files
 
 Graph and problem files contain the core data plus a `derived` block computed by the editor, for search code to read

@@ -5,7 +5,7 @@ import { evaluateGraph } from "@/model/actions";
 import { computeHeuristicTable } from "@/model/heuristics/registry";
 import type { Problem, StateSpaceGraph } from "@/model/schema";
 import { parseGraph, parseProblem } from "@/model/serialize";
-import { editorReducer, initialEditorState, sampleState } from "@/state/editorReducer";
+import { editorReducer, initialEditorState, sampleState, type EditorState } from "@/state/editorReducer";
 import Canvas from "./Canvas";
 import CostModelPanel from "./CostModelPanel";
 import Inspector from "./Inspector";
@@ -34,6 +34,8 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
   const [snap, setSnap] = useState(false);
   const [renameRequest, setRenameRequest] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
+  // On narrow screens the side panel is a bottom sheet; on wide screens this flag is ignored.
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   // Restore the browser autosave (only when nothing was opened from the server).
   useEffect(() => {
@@ -97,12 +99,14 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
   const onRequestRename = useCallback((id: string) => {
     dispatch({ type: "select", selection: { kind: "node", id } });
     setRenameRequest(id);
+    setSheetOpen(true);
   }, []);
   const onRenameHandled = useCallback(() => setRenameRequest(null), []);
 
   const shared = { state, dispatch, evaluated };
   const selectionTitle =
     state.selection?.kind === "node" ? "State" : state.selection?.kind === "edge" ? "Action (edge)" : "Selection";
+  const selectionSummary = summarize(state);
 
   return (
     <div className={styles.shell}>
@@ -115,13 +119,23 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
           snap={snap}
           onRequestRename={onRequestRename}
         />
-        <aside className={styles.sidebar}>
+        <aside className={styles.sidebar} data-open={sheetOpen}>
+          <button
+            className={styles.sheetToggle}
+            onClick={() => setSheetOpen((o) => !o)}
+            aria-expanded={sheetOpen}
+            aria-label={sheetOpen ? "Hide details panel" : "Show details panel"}
+          >
+            <span className={styles.sheetHandle} aria-hidden />
+            <span className={styles.sheetTitle}>{selectionSummary}</span>
+            <span aria-hidden>{sheetOpen ? "▾" : "▴"}</span>
+          </button>
           {loadError && <p className={styles.error} style={{ padding: "10px 14px" }}>{loadError}</p>}
           <Section title={selectionTitle}>
             <Inspector
               {...shared}
               heuristic={heuristic}
-                  renameRequest={renameRequest}
+              renameRequest={renameRequest}
               onRenameHandled={onRenameHandled}
             />
           </Section>
@@ -141,6 +155,18 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
       </div>
     </div>
   );
+}
+
+/** One line for the collapsed bottom sheet: what is selected, or the problem. */
+function summarize(state: EditorState): string {
+  const { graph, problem, selection } = state;
+  const name = (id: string | null) => graph.nodes.find((n) => n.id === id)?.name ?? "—";
+  if (selection?.kind === "node") return `State ${name(selection.id)}`;
+  if (selection?.kind === "edge") {
+    const e = graph.edges.find((x) => x.id === selection.id);
+    if (e) return `Action ${name(e.from)} ${e.directed ? "→" : "↔"} ${name(e.to)}`;
+  }
+  return `Details · ${name(problem.initial)} → ${name(problem.goal)}`;
 }
 
 /** Keyboard shortcuts are suppressed while typing, but not on checkboxes or buttons. */
