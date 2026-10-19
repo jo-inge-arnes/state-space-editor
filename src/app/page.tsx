@@ -48,22 +48,6 @@ async function SavedFiles() {
   return (
     <div className={styles.grid}>
       <section className={styles.card}>
-        <h2>Graphs ({graphs.length})</h2>
-        {graphs.length === 0 ? (
-          <p className={styles.muted}>No graphs saved yet. Open the editor and use “Save &amp; load”.</p>
-        ) : (
-          <ul className={styles.list}>
-            {graphs.map((g) => (
-              <li key={g.id}>
-                <Link href={`/editor?graph=${encodeURIComponent(g.id)}`}>{g.name}</Link>
-                <code>{g.id}</code>
-                {g.updatedAt && <time dateTime={g.updatedAt}>{g.updatedAt.slice(0, 16).replace("T", " ")}</time>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      <section className={styles.card}>
         <h2>Problems ({problems.length})</h2>
         {problems.length === 0 ? (
           <p className={styles.muted}>No problems saved yet.</p>
@@ -74,6 +58,22 @@ async function SavedFiles() {
                 <Link href={`/editor?problem=${encodeURIComponent(p.id)}`}>{p.name}</Link>
                 <code>{p.id}</code>
                 {p.graphId && <span className={styles.muted}>graph: {p.graphId}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className={styles.card}>
+        <h2>Graphs ({graphs.length})</h2>
+        {graphs.length === 0 ? (
+          <p className={styles.muted}>No graphs saved yet. Open the editor and use “Save &amp; load”.</p>
+        ) : (
+          <ul className={styles.list}>
+            {graphs.map((g) => (
+              <li key={g.id}>
+                <Link href={`/editor?graph=${encodeURIComponent(g.id)}`}>{g.name}</Link>
+                <code>{g.id}</code>
+                {g.updatedAt && <time dateTime={g.updatedAt}>{g.updatedAt.slice(0, 16).replace("T", " ")}</time>}
               </li>
             ))}
           </ul>
