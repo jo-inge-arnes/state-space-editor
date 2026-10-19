@@ -7,16 +7,28 @@
 
 export type Compiled<F> = { ok: true; fn: F } | { ok: false; error: string };
 
+// Compiling is the slow part and the same source is compiled on every graph evaluation (each drag
+// step, each sample of a layout search), so compiled functions are cached by their source text.
+const cache = new Map<string, Compiled<never>>();
+const CACHE_LIMIT = 100;
+
 export function compileUserFunction<F extends (...args: never[]) => unknown>(
   params: readonly string[],
   source: string,
 ): Compiled<F> {
+  const key = `${params.join(",")}\n${source}`;
+  const hit = cache.get(key);
+  if (hit) return hit as Compiled<F>;
+  let compiled: Compiled<F>;
   try {
     const fn = new Function(...params, `"use strict";\n${source}`) as F;
-    return { ok: true, fn };
+    compiled = { ok: true, fn };
   } catch (err) {
-    return { ok: false, error: `Compile error: ${errorMessage(err)}` };
+    compiled = { ok: false, error: `Compile error: ${errorMessage(err)}` };
   }
+  if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+  cache.set(key, compiled as Compiled<never>);
+  return compiled;
 }
 
 export type NumberResult = { ok: true; value: number } | { ok: false; error: string };

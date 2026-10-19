@@ -7,6 +7,7 @@ import type { Edge, StateNode } from "@/model/schema";
 import type { EditorAction, EditorState } from "@/state/editorReducer";
 import { formatNumber } from "./format";
 import NumberInput from "./NumberInput";
+import { HValueInput } from "./ToolParts";
 import styles from "./Editor.module.css";
 
 interface Props {
@@ -19,6 +20,8 @@ interface Props {
   onRenameHandled: () => void;
   /** Open the “Change length” tool for an edge with a new target length (units). */
   onRequestLength: (edgeId: string, length: number) => void;
+  /** Open the “Change h(n)” tool for a state with a target h. */
+  onRequestH: (nodeId: string, h: number) => void;
 }
 
 export default function Inspector(props: Props) {
@@ -64,6 +67,7 @@ function NodeInspector({
   heuristic,
   renameRequest,
   onRenameHandled,
+  onRequestH,
 }: Props & { node: StateNode }) {
   const { graph, problem } = state;
   const [name, setName] = useState(node.name);
@@ -152,9 +156,19 @@ function NodeInspector({
         </button>
       </div>
       {heuristic && !heuristic.error && (
-        <p className={styles.muted}>
-          h = {h === null || h === undefined ? `⚠ ${hErr ?? ""}` : formatNumber(h)}
-        </p>
+        <div className={styles.field}>
+          <span>h(n)</span>
+          <span>
+            <HValueInput
+              problem={problem}
+              nodeId={node.id}
+              h={h}
+              error={hErr}
+              dispatch={dispatch}
+              onRequestH={onRequestH}
+            />
+          </span>
+        </div>
       )}
       <div>
         <p className={styles.muted}>ACTIONS({node.name})</p>

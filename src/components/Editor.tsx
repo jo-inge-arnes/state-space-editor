@@ -9,11 +9,13 @@ import { parseGraph, parseProblem } from "@/model/serialize";
 import { editorReducer, initialEditorState, sampleState, type EditorState } from "@/state/editorReducer";
 import Canvas from "./Canvas";
 import CostModelPanel from "./CostModelPanel";
+import HPanel, { useHTool } from "./HPanel";
 import Inspector from "./Inspector";
 import LengthPanel, { useLengthTool } from "./LengthPanel";
 import ProblemPanel from "./ProblemPanel";
 import StoragePanel from "./StoragePanel";
 import Toolbar from "./Toolbar";
+import { useSessionMarks } from "./tools";
 import TransitionPanel from "./TransitionPanel";
 import styles from "./Editor.module.css";
 
@@ -73,18 +75,51 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
     return () => clearTimeout(t);
   }, [state.graph, state.problem, state.dirty, restored]);
 
-  const lengthTool = useLengthTool(state, dispatch);
-  const lengthActive = !!lengthTool.overlay;
-  const closeLength = lengthTool.close;
+  // The “Change length” and “Change h(n)” tools; at most one is open at a time.
+  const marks = useSessionMarks();
+  const lengthTool = useLengthTool(state, dispatch, marks);
+  const hTool = useHTool(state, dispatch, marks);
+  const overlay = lengthTool.overlay ?? hTool.overlay;
+  const toolActive = !!overlay;
+  const { close: closeLength, start: beginLength } = lengthTool;
+  const { close: closeH, start: beginH } = hTool;
+  const closeTools = useCallback(() => {
+    closeLength();
+    closeH();
+  }, [closeLength, closeH]);
+  // Bring the tool's panel into view when it opens (the h table is far down the sidebar).
+  const [reveal, setReveal] = useState(0);
+  useEffect(() => {
+    if (reveal) document.getElementById("tool-section")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [reveal]);
+  const startLength = useCallback(
+    (edgeId: string, length: number) => {
+      closeH();
+      beginLength(edgeId, length);
+      setSheetOpen(true);
+      setReveal((r) => r + 1);
+    },
+    [closeH, beginLength],
+  );
+  const startH = useCallback(
+    (nodeId: string, h: number) => {
+      closeLength();
+      dispatch({ type: "select", selection: { kind: "node", id: nodeId } });
+      beginH(nodeId, h);
+      setSheetOpen(true);
+      setReveal((r) => r + 1);
+    },
+    [closeLength, beginH],
+  );
 
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTextEntry(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (lengthActive) {
-        // The canvas belongs to the length tool; only Esc (cancel) applies.
-        if (k === "escape") closeLength();
+      if (toolActive) {
+        // The canvas belongs to the open tool; only Esc (cancel) applies.
+        if (k === "escape") closeTools();
         return;
       }
       if (k === "v") dispatch({ type: "setMode", mode: "select" });
@@ -100,7 +135,7 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [lengthActive, closeLength]);
+  }, [toolActive, closeTools]);
 
   const evaluated = useMemo(() => evaluateGraph(state.graph), [state.graph]);
   const heuristic = useMemo(
@@ -118,8 +153,8 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
   }, []);
   const onRenameHandled = useCallback(() => setRenameRequest(null), []);
 
-  // The canvas shows the length tool's proposal (new positions, costs and h) before it is applied.
-  const preview = lengthTool.proposal?.positions;
+  // The canvas shows the open tool's proposal (new positions, costs and h) before it is applied.
+  const preview = lengthTool.proposal?.positions ?? hTool.previewPositions;
   const display = useMemo(() => {
     if (!preview) return { state, evaluated, heuristic };
     const graph = { ...state.graph, nodes: state.graph.nodes.map((n) => (preview[n.id] ? { ...n, ...preview[n.id] } : n)) };
@@ -134,7 +169,7 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
   const shared = { state, dispatch, evaluated };
   const selectionTitle =
     state.selection?.kind === "node" ? "State" : state.selection?.kind === "edge" ? "Action (edge)" : "Selection";
-  const selectionSummary = lengthTool.title ?? summarize(state);
+  const selectionSummary = lengthTool.title ?? hTool.title ?? summarize(state);
 
   return (
     <div className={styles.shell}>
@@ -148,7 +183,7 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
           showH={showH}
           snap={snap}
           onRequestRename={onRequestRename}
-          overlay={lengthTool.overlay}
+          overlay={overlay}
         />
         <aside className={styles.sidebar} data-open={sheetOpen}>
           <button
@@ -163,8 +198,19 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
           </button>
           {loadError && <p className={styles.error} style={{ padding: "10px 14px" }}>{loadError}</p>}
           {lengthTool.edit && (
-            <Section title="Change length">
-              <LengthPanel tool={lengthTool} state={state} evaluated={evaluated} />
+            <Section id="tool-section" title="Change length">
+              <LengthPanel
+                tool={lengthTool}
+                state={state}
+                evaluated={evaluated}
+                heuristic={heuristic}
+                previewHeuristic={display.heuristic}
+              />
+            </Section>
+          )}
+          {hTool.edit && (
+            <Section id="tool-section" title="Change h(n)">
+              <HPanel tool={hTool} state={state} evaluated={evaluated} heuristic={heuristic} />
             </Section>
           )}
           <Section title={selectionTitle}>
@@ -173,11 +219,18 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
               heuristic={heuristic}
               renameRequest={renameRequest}
               onRenameHandled={onRenameHandled}
-              onRequestLength={lengthTool.start}
+              onRequestLength={startLength}
+              onRequestH={startH}
             />
           </Section>
           <Section title="Problem & heuristic">
-            <ProblemPanel state={state} dispatch={dispatch} heuristic={heuristic} />
+            <ProblemPanel
+              state={state}
+              dispatch={dispatch}
+              heuristic={heuristic}
+              onRequestH={startH}
+              hSet={marks.hSet}
+            />
           </Section>
           <Section title="Step costs & scale">
             <CostModelPanel {...shared} />
@@ -213,9 +266,9 @@ function isTextEntry(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "reset", "file"].includes(target.type);
 }
 
-function Section({ title, open = true, children }: { title: string; open?: boolean; children: ReactNode }) {
+function Section({ id, title, open = true, children }: { id?: string; title: string; open?: boolean; children: ReactNode }) {
   return (
-    <details className={styles.section} open={open}>
+    <details id={id} className={styles.section} open={open}>
       <summary>{title}</summary>
       {children}
     </details>

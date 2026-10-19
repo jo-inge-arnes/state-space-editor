@@ -1,4 +1,4 @@
-import type { EvaluatedGraph } from "../actions";
+import { evaluateGraph, type EvaluatedGraph } from "../actions";
 import { metricsFor } from "../geometry";
 import type { FunctionRef, Problem, StateSpaceGraph } from "../schema";
 import { compileUserFunction, evaluateNumber } from "../userFunctions";
@@ -41,6 +41,47 @@ export function resolveHeuristic(ref: FunctionRef): ResolvedHeuristic {
   };
 }
 
+/** The context every heuristic receives; null when the problem has no goal in this graph. */
+export function heuristicContext(
+  graph: StateSpaceGraph,
+  problem: Problem,
+  evaluated: EvaluatedGraph,
+): HeuristicContext | null {
+  const goal = problem.goal ? evaluated.nodeById.get(problem.goal) : undefined;
+  if (!goal) return null;
+  return {
+    ...metricsFor(graph.pxPerUnit),
+    graph,
+    problem,
+    nodeById: evaluated.nodeById,
+    goal,
+    actions: evaluated.actions,
+  };
+}
+
+/**
+ * Same context as `heuristicContext`, but the graph is evaluated (costs, ACTIONS) only if the
+ * heuristic reads `ctx.actions` or `ctx.nodeById`. For searches that evaluate h many times.
+ */
+export function lazyHeuristicContext(graph: StateSpaceGraph, problem: Problem): HeuristicContext | null {
+  const goal = problem.goal ? graph.nodes.find((n) => n.id === problem.goal) : undefined;
+  if (!goal) return null;
+  let evaluated: EvaluatedGraph | undefined;
+  const ev = () => (evaluated ??= evaluateGraph(graph));
+  return {
+    ...metricsFor(graph.pxPerUnit),
+    graph,
+    problem,
+    goal,
+    get nodeById() {
+      return ev().nodeById;
+    },
+    get actions() {
+      return ev().actions;
+    },
+  };
+}
+
 export interface HeuristicTable {
   /** h(n) per node id; null where evaluation failed. */
   values: Record<string, number | null>;
@@ -58,19 +99,11 @@ export function computeHeuristicTable(
   problem: Problem,
   evaluated: EvaluatedGraph,
 ): HeuristicTable {
-  const goal = problem.goal ? evaluated.nodeById.get(problem.goal) : undefined;
-  if (!goal) return { values: {}, errors: {}, error: "Choose a goal node to compute heuristic values." };
+  const ctx = heuristicContext(graph, problem, evaluated);
+  if (!ctx) return { values: {}, errors: {}, error: "Choose a goal node to compute heuristic values." };
   const resolved = resolveHeuristic(problem.heuristic);
   if (!resolved.ok) return { values: {}, errors: {}, error: resolved.error };
 
-  const ctx: HeuristicContext = {
-    ...metricsFor(graph.pxPerUnit),
-    graph,
-    problem,
-    nodeById: evaluated.nodeById,
-    goal,
-    actions: evaluated.actions,
-  };
   const values: Record<string, number | null> = {};
   const errors: Record<string, string> = {};
   for (const node of graph.nodes) {

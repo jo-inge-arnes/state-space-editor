@@ -96,6 +96,34 @@ How it works (`src/model/layout/`):
 
 Typical graphs take a few milliseconds; the panel shows the time and the number of rigidity tests.
 
+## Setting h(n) by moving a state
+
+Type a new value for a state's **h(n)**, either in the state inspector or in the h table under *Problem & heuristic*.
+The editor then moves that state until the problem's *actual* heuristic has that value: straight-line, Manhattan, or
+your own function, including functions that read costs from `ctx.actions`.
+
+- **Keep the length of:** choose one of the state's edges (or click it on the canvas). The state rotates about the
+  other end on a fixed radius, shown as a dashed circle, so that edge's length and cost stay the same. Only this state
+  moves, so its other edges change length; they are listed.
+  - *any edge* tries every edge (and *no edge*) and ranks the results. Edges whose length you set earlier are kept
+    where possible.
+  - *no edge* moves the state in a straight line in the direction where h changes fastest.
+- The result shows the rotation (e.g. “A rotates 24.7° clockwise about C, keeping A – C”), the changed edges, any
+  other h values that change (custom heuristics may depend on other states), and alternatives with ◀ ▶.
+  - If the value is out of reach, the panel shows the range h can take and offers the closest value.
+- Manual heuristics are edited directly. Zero, and the goal's own h, can't be changed by moving.
+- States whose h you set are marked in the h table. The length tool then keeps them in place by default and lists any
+  h values its proposal would change.
+
+How it works (`src/model/layout/adjustH.ts`): h is treated as a black box and evaluated through the same context as the
+h table. Moving along a circle (or a ray) is a 1-D problem:
+1. Sample 720 positions.
+2. Bracket each sign change of h − target and refine it by bisection.
+3. Accept a root only where h really equals the target, so a jump in a discontinuous function isn't mistaken for a
+   solution.
+
+Positions where the heuristic throws are skipped.
+
 ## JSON files
 
 Graph and problem files contain the core data plus a `derived` block computed by the editor, for search code to read
@@ -130,7 +158,7 @@ Everything (UI, export) goes through `computeHeuristicTable` / `evaluateGraph`, 
 
 ```
 src/model/        schema (zod), geometry, cost models, heuristics, actions, serialization
-src/model/layout/ edge-length adjustment: blocks, pebble game, release search, solver
+src/model/layout/ edge-length adjustment (blocks, pebble game, release search, solver) and h targets (adjustH)
 src/state/        editor reducer
 src/components/   client components: Canvas (SVG), Inspector, panels, FunctionEditor
 src/server/       storage (server-only): file-system and Vercel Blob backends

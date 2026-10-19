@@ -33,19 +33,28 @@ type Drag =
 
 type Point = { x: number; y: number };
 
-/** The “Change length” tool's view of the canvas: lockable edges, and a preview of the new layout. */
+/**
+ * How the “Change length” and “Change h(n)” tools use the canvas: clickable edges while choosing,
+ * then a preview of the new layout.
+ */
 export interface CanvasOverlay {
-  phase: "locks" | "preview";
+  kind: "length" | "h";
+  phase: "choose" | "preview";
   /** The edited edge (and its opposite one-way edge). */
   targetEdgeIds: ReadonlySet<string>;
-  /** Edges whose length could change; clicking one toggles its lock. */
+  /** The state whose h is being set. */
+  targetNodeId?: string;
+  /** Edges that can be clicked: they toggle a lock (length) or pick the edge to keep (h). */
   affected: ReadonlySet<string>;
+  /** Edges that keep their length. */
   locked: ReadonlySet<string>;
   /** Edges whose length changes in the preview. */
   changed?: ReadonlySet<string>;
   /** Current positions of states that move in the preview (the canvas shows the new ones). */
   ghosts?: { id: string; x: number; y: number }[];
-  onToggleLock: (edgeId: string) => void;
+  /** The circle a state moves along (px). */
+  guide?: { cx: number; cy: number; r: number };
+  onEdgeClick: (edgeId: string) => void;
 }
 
 interface Props {
@@ -188,7 +197,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
     if (overlay) {
       if (!overlay.affected.has(edge.id)) return;
       e.stopPropagation();
-      overlay.onToggleLock(edge.id);
+      overlay.onEdgeClick(edge.id);
       return;
     }
     e.stopPropagation();
@@ -335,6 +344,10 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
           />
         ))}
 
+        {overlay?.guide && (
+          <circle className={styles.guideCircle} cx={overlay.guide.cx} cy={overlay.guide.cy} r={overlay.guide.r} />
+        )}
+
         {overlay?.ghosts?.map((ghost) => {
           const now = evaluated.nodeById.get(ghost.id);
           return (
@@ -373,6 +386,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
                   <circle r={R + 10} className={styles.ringGoal} strokeWidth={1.5} />
                 </>
               )}
+              {overlay?.targetNodeId === node.id && <circle r={R + 7} className={styles.targetRing} />}
               <circle r={R + 8} className={styles.nodeHit} />
               <circle r={R} className={styles.nodeCircle} />
               <text className={styles.nodeName} textAnchor="middle" dominantBaseline="central">
@@ -398,7 +412,9 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
         })}
       </svg>
 
-      <div className={styles.hint}>{overlay ? overlayHint(overlay, coarse) : hintFor(state, coarse)}</div>
+      <div className={styles.hint}>
+        {overlay ? overlayHint(overlay, coarse, evaluated.nodeById.get(overlay.targetNodeId ?? "")?.name) : hintFor(state, coarse)}
+      </div>
 
       <div className={styles.overlay}>
         <div>
@@ -524,8 +540,9 @@ function edgeLabel(forward: number | null, backward: number | null | undefined):
   return `${f} / ${backward === null ? "?" : formatNumber(backward)}`;
 }
 
-function overlayHint(overlay: CanvasOverlay, touch: boolean): string {
+function overlayHint(overlay: CanvasOverlay, touch: boolean, name = ""): string {
   if (overlay.phase === "preview") return "Preview · dashed circles are the current positions";
+  if (overlay.kind === "h") return `${touch ? "Tap" : "Click"} an edge of ${name} to keep its length`;
   return `${touch ? "Tap" : "Click"} highlighted edges to lock or unlock their length`;
 }
 

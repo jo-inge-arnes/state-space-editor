@@ -8,9 +8,8 @@ import {
   type HeuristicTable,
 } from "@/model/heuristics/registry";
 import type { EditorAction, EditorState } from "@/state/editorReducer";
-import { formatNumber } from "./format";
 import FunctionPicker from "./FunctionPicker";
-import NumberInput from "./NumberInput";
+import { HValueInput } from "./ToolParts";
 import styles from "./Editor.module.css";
 
 const heuristics = listHeuristics();
@@ -19,9 +18,13 @@ interface Props {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
   heuristic: HeuristicTable | null;
+  /** Open the “Change h(n)” tool for a state with a target h. */
+  onRequestH: (nodeId: string, h: number) => void;
+  /** States whose h was set with that tool in this session. */
+  hSet: ReadonlySet<string>;
 }
 
-export default function ProblemPanel({ state, dispatch, heuristic }: Props) {
+export default function ProblemPanel({ state, dispatch, heuristic, onRequestH, hSet }: Props) {
   const { graph, problem, selection } = state;
   const isManual = problem.heuristic.kind === "builtin" && problem.heuristic.id === "manual";
   const nodes = [...graph.nodes].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -110,29 +113,27 @@ export default function ProblemPanel({ state, dispatch, heuristic }: Props) {
                         {n.name}
                         {problem.initial === n.id && <span className={styles.okText}> (start)</span>}
                         {problem.goal === n.id && <span className={styles.error}> (goal)</span>}
+                        {hSet.has(n.id) && !isManual && <span className={styles.badge}>set</span>}
                       </td>
                       <td className={styles.num}>
-                        {isManual ? (
-                          <NumberInput
-                            value={problem.manualH[n.id]}
-                            placeholder="0"
-                            step={0.1}
-                            onCommit={(value) => dispatch({ type: "setManualH", nodeId: n.id, value })}
-                          />
-                        ) : h === null || h === undefined ? (
-                          <span className={styles.error} title={err}>
-                            ⚠ {err}
-                          </span>
-                        ) : (
-                          formatNumber(h)
-                        )}
+                        <HValueInput
+                          problem={problem}
+                          nodeId={n.id}
+                          h={h}
+                          error={err}
+                          dispatch={dispatch}
+                          onRequestH={onRequestH}
+                        />
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            <p className={styles.muted}>h(n) is an estimate of the cost from n to the goal, in graph units.</p>
+            <p className={styles.muted}>
+              h(n) is an estimate of the cost from n to the goal, in graph units.
+              {!isManual && " Type a new value to move the state until its h has that value."}
+            </p>
           </>
         )
       )}

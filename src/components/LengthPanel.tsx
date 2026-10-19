@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState, type Dispatch, type ReactNode } from "react";
 import type { EvaluatedGraph } from "@/model/actions";
+import type { HeuristicTable } from "@/model/heuristics/registry";
 import {
   adjustEdgeLength,
   potentiallyAffected,
@@ -10,14 +11,23 @@ import {
   type KeepFixed,
   type Proposal,
 } from "@/model/layout/adjustLength";
-import type { StateSpaceGraph } from "@/model/schema";
 import type { EditorAction, EditorState } from "@/state/editorReducer";
 import type { CanvasOverlay } from "./Canvas";
 import { formatNumber } from "./format";
 import NumberInput from "./NumberInput";
+import { AltNav, HChangeList } from "./ToolParts";
+import {
+  currentPositions,
+  geometryKey,
+  hTableChanges,
+  nameOf,
+  plural,
+  positionsMatch,
+  samePair,
+  type Positions,
+  type SessionMarks,
+} from "./tools";
 import styles from "./Editor.module.css";
-
-type Positions = Record<string, { x: number; y: number }>;
 
 interface LengthEdit {
   edgeId: string;
@@ -39,8 +49,8 @@ export interface LengthTool {
   edit: LengthEdit | null;
   /** Edges whose length could change, nearest first (opposite one-way edges grouped). */
   affected: BarInfo[];
-  /** Edges whose length was set with this tool in this session (pre-locked next time). */
-  lengthsSet: ReadonlySet<string>;
+  /** What was set earlier in this session (edge lengths are pre-locked next time). */
+  marks: SessionMarks;
   /** The proposal being previewed, if the result is current. */
   proposal: Proposal | null;
   stale: boolean;
@@ -62,12 +72,12 @@ export interface LengthTool {
 }
 
 /** State and actions of the “Change length” tool, shared by the side panel and the canvas. */
-export function useLengthTool(state: EditorState, dispatch: Dispatch<EditorAction>): LengthTool {
+export function useLengthTool(state: EditorState, dispatch: Dispatch<EditorAction>, marks: SessionMarks): LengthTool {
   const { graph } = state;
+  const { lengthsSet, hSet, markLengths } = marks;
   const [edit, setEdit] = useState<LengthEdit | null>(null);
-  // Remembered for this session only: the last lock choices, and edges whose length was set here.
+  // The last lock choices, remembered for this session.
   const [sessionLocks, setSessionLocks] = useState<ReadonlySet<string>>(new Set());
-  const [lengthsSet, setLengthsSet] = useState<ReadonlySet<string>>(new Set());
 
   const key = useMemo(() => geometryKey(graph), [graph]);
   const edgeId = edit?.edgeId ?? null;
@@ -79,13 +89,7 @@ export function useLengthTool(state: EditorState, dispatch: Dispatch<EditorActio
   const stale = !!active?.result && active.resultKey !== key;
   const result = active?.phase === "result" && !stale ? active.result : null;
   const proposal = result?.ok ? (result.proposals[active!.alt] ?? null) : null;
-  const canUndo =
-    active?.phase === "applied" &&
-    !!active.undo &&
-    Object.entries(active.undo.after).every(([id, p]) => {
-      const n = graph.nodes.find((x) => x.id === id);
-      return n?.x === p.x && n?.y === p.y;
-    });
+  const canUndo = active?.phase === "applied" && !!active.undo && positionsMatch(graph, active.undo.after);
 
   const run = useCallback(
     (e: LengthEdit, target = e.target): LengthEdit => {
@@ -101,11 +105,15 @@ export function useLengthTool(state: EditorState, dispatch: Dispatch<EditorActio
       const pre = new Set(
         bars.flatMap((b) => (b.edgeIds.some((x) => sessionLocks.has(x) || lengthsSet.has(x)) ? b.edgeIds : [])),
       );
-      const e: LengthEdit = { edgeId: id, target, locked: pre, keepFixed: "auto", phase: "locks", result: null, resultKey: null, alt: 0 };
+      // Keep an end in place if its h was set earlier and the other end's wasn't.
+      const edge = graph.edges.find((x) => x.id === id);
+      const keepFixed: KeepFixed =
+        edge && hSet.has(edge.from) !== hSet.has(edge.to) ? (hSet.has(edge.from) ? "from" : "to") : "auto";
+      const e: LengthEdit = { edgeId: id, target, locked: pre, keepFixed, phase: "locks", result: null, resultKey: null, alt: 0 };
       // Nothing to lock (a bridge): go straight to the result.
       setEdit(bars.length ? e : run(e));
     },
-    [graph, sessionLocks, lengthsSet, run],
+    [graph, sessionLocks, lengthsSet, hSet, run],
   );
 
   const toggleLock = useCallback(
@@ -131,7 +139,8 @@ export function useLengthTool(state: EditorState, dispatch: Dispatch<EditorActio
   const overlay = useMemo<CanvasOverlay | undefined>(() => {
     if (!active || active.phase === "applied") return undefined;
     return {
-      phase: proposal ? "preview" : "locks",
+      kind: "length",
+      phase: proposal ? "preview" : "choose",
       targetEdgeIds: new Set(pairIds),
       affected: new Set(affected.flatMap((b) => b.edgeIds)),
       locked: active.locked,
@@ -142,14 +151,14 @@ export function useLengthTool(state: EditorState, dispatch: Dispatch<EditorActio
             return n ? [{ id, x: n.x, y: n.y }] : [];
           })
         : undefined,
-      onToggleLock: toggleLock,
+      onEdgeClick: toggleLock,
     };
   }, [active, proposal, pairIds, affected, graph, toggleLock]);
 
   return {
     edit: active,
     affected,
-    lengthsSet,
+    marks,
     proposal,
     stale,
     canUndo,
@@ -170,21 +179,17 @@ export function useLengthTool(state: EditorState, dispatch: Dispatch<EditorActio
     back: () => active && setEdit({ ...active, phase: "locks", result: null }),
     apply: () => {
       if (!active || !proposal) return;
-      const before: Positions = {};
-      for (const id of Object.keys(proposal.positions)) {
-        const n = graph.nodes.find((x) => x.id === id)!;
-        before[id] = { x: n.x, y: n.y };
-      }
+      const before = currentPositions(graph, proposal.positions);
       dispatch({ type: "setPositions", positions: proposal.positions });
       const wasSet = pairIds.every((x) => lengthsSet.has(x));
-      setLengthsSet(new Set([...lengthsSet, ...pairIds]));
+      markLengths(pairIds, true);
       setSessionLocks(new Set(active.locked));
       setEdit({ ...active, phase: "applied", result: null, undo: { before, after: proposal.positions, wasSet } });
     },
     undo: () => {
       if (!active?.undo || !canUndo) return;
       dispatch({ type: "setPositions", positions: active.undo.before });
-      if (!active.undo.wasSet) setLengthsSet(new Set([...lengthsSet].filter((x) => !pairIds.includes(x))));
+      if (!active.undo.wasSet) markLengths(pairIds, false);
       setEdit({ ...active, phase: "locks", result: null, undo: undefined });
     },
     close,
@@ -195,10 +200,13 @@ interface Props {
   tool: LengthTool;
   state: EditorState;
   evaluated: EvaluatedGraph;
+  /** h now and in the previewed layout, to list h values that change. */
+  heuristic: HeuristicTable | null;
+  previewHeuristic: HeuristicTable | null;
 }
 
 /** The “Change length” panel: choose locked edges, compute, preview alternatives, apply or undo. */
-export default function LengthPanel({ tool, state, evaluated }: Props) {
+export default function LengthPanel({ tool, state, evaluated, heuristic, previewHeuristic }: Props) {
   const { edit } = tool;
   if (!edit) return null;
   const edge = state.graph.edges.find((e) => e.id === edit.edgeId)!;
@@ -261,7 +269,9 @@ export default function LengthPanel({ tool, state, evaluated }: Props) {
                         {bar.a} – {bar.b}
                       </span>
                       <span className={styles.lockLength}>{formatNumber(bar.length)}</span>
-                      {bar.edgeIds.some((id) => tool.lengthsSet.has(id)) && <span className={styles.badge}>set earlier</span>}
+                      {bar.edgeIds.some((id) => tool.marks.lengthsSet.has(id)) && (
+                        <span className={styles.badge}>set earlier</span>
+                      )}
                     </label>
                   </li>
                 ))}
@@ -305,12 +315,29 @@ export default function LengthPanel({ tool, state, evaluated }: Props) {
         </>
       )}
 
-      {result && <ResultView tool={tool} result={result} pair={pair} />}
+      {result && (
+        <ResultView
+          tool={tool}
+          result={result}
+          pair={pair}
+          hChanges={hTableChanges(state.graph, heuristic, previewHeuristic)}
+        />
+      )}
     </div>
   );
 }
 
-function ResultView({ tool, result, pair }: { tool: LengthTool; result: AdjustResult; pair: ReactNode }) {
+function ResultView({
+  tool,
+  result,
+  pair,
+  hChanges,
+}: {
+  tool: LengthTool;
+  result: AdjustResult;
+  pair: ReactNode;
+  hChanges: ReturnType<typeof hTableChanges>;
+}) {
   const { edit, proposal } = tool;
   const buttons = (
     <div className={styles.row}>
@@ -388,23 +415,13 @@ function ResultView({ tool, result, pair }: { tool: LengthTool; result: AdjustRe
           <li key={m}>{m}</li>
         ))}
       </ul>
-      {n > 1 && (
-        <div className={styles.row}>
-          <button aria-label="Previous option" disabled={edit!.alt === 0} onClick={() => tool.setAlt(edit!.alt - 1)}>
-            ◀
-          </button>
-          <span>
-            Option {edit!.alt + 1} of {n}
-            <span className={styles.muted}>
-              {" "}
-              · {p.kind === "least-movement" ? "least total movement" : "fewest moved states"}
-            </span>
-          </span>
-          <button aria-label="Next option" disabled={edit!.alt === n - 1} onClick={() => tool.setAlt(edit!.alt + 1)}>
-            ▶
-          </button>
-        </div>
-      )}
+      <HChangeList changes={hChanges} hSet={tool.marks.hSet} />
+      <AltNav
+        index={edit!.alt}
+        count={n}
+        label={p.kind === "least-movement" ? "least total movement" : "fewest moved states"}
+        onChange={tool.setAlt}
+      />
       <p className={styles.muted}>
         Computed in {Math.max(1, Math.round(result.stats.ms))} ms ({result.stats.rigidityTests} rigidity{" "}
         {result.stats.rigidityTests === 1 ? "test" : "tests"}).
@@ -412,26 +429,4 @@ function ResultView({ tool, result, pair }: { tool: LengthTool; result: AdjustRe
       {buttons}
     </>
   );
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-function nameOf(graph: StateSpaceGraph, id: string): string {
-  return graph.nodes.find((n) => n.id === id)?.name ?? id;
-}
-
-/** Ids of all edges between the two states (an edge and its opposite one-way edge). */
-function samePair(graph: StateSpaceGraph, a: string, b: string): string[] {
-  return graph.edges.filter((e) => (e.from === a && e.to === b) || (e.from === b && e.to === a)).map((e) => e.id);
-}
-
-/** Everything a length adjustment depends on: scale, positions and which states each edge joins. */
-function geometryKey(graph: StateSpaceGraph): string {
-  return [
-    graph.pxPerUnit,
-    graph.nodes.map((n) => `${n.id}:${n.x}:${n.y}`).join(","),
-    graph.edges.map((e) => `${e.id}:${e.from}:${e.to}`).join(","),
-  ].join("|");
 }
