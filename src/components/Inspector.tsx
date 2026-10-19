@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type Dispatch } from "react";
+import { useLayoutEffect, useRef, useState, type Dispatch } from "react";
 import type { EvaluatedGraph } from "@/model/actions";
 import type { HeuristicTable } from "@/model/heuristics/registry";
 import type { Edge, StateNode } from "@/model/schema";
@@ -64,7 +64,9 @@ function NodeInspector({
     setName(node.name);
   }
 
-  useEffect(() => {
+  // Layout effect: runs inside the double-tap's event (the rename request is flushed synchronously),
+  // which iOS requires before it shows the keyboard for a programmatic focus.
+  useLayoutEffect(() => {
     if (renameRequest !== node.id) return;
     inputRef.current?.focus();
     inputRef.current?.select();

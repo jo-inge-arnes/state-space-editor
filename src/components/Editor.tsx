@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { evaluateGraph } from "@/model/actions";
 import { computeHeuristicTable } from "@/model/heuristics/registry";
 import type { Problem, StateSpaceGraph } from "@/model/schema";
@@ -96,10 +97,14 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
     () => (state.graph.nodes.length ? computeHeuristicTable(state.graph, state.problem, evaluated) : null),
     [state.graph, state.problem, evaluated],
   );
+  // Rendered synchronously so the name field is focused within the tap/double-click event itself;
+  // iOS only opens the keyboard for focus() calls made during a user gesture.
   const onRequestRename = useCallback((id: string) => {
-    dispatch({ type: "select", selection: { kind: "node", id } });
-    setRenameRequest(id);
-    setSheetOpen(true);
+    flushSync(() => {
+      dispatch({ type: "select", selection: { kind: "node", id } });
+      setRenameRequest(id);
+      setSheetOpen(true);
+    });
   }, []);
   const onRenameHandled = useCallback(() => setRenameRequest(null), []);
 

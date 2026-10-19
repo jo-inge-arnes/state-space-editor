@@ -125,7 +125,13 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
 
   // Runs before the node/edge handlers: a second finger turns whatever is going on into a pinch.
   const onDownCapture = (e: PointerEvent<SVGSVGElement>) => {
+    // Commit a field being edited (e.g. a state name) before the canvas changes the selection.
+    // Touch taps don't blur it themselves, because the canvas suppresses the follow-up mouse events.
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) active.blur();
     if (e.pointerType === "mouse") return;
+    // The first finger down: forget pointers whose up/cancel never reached the canvas.
+    if (e.isPrimary) pointers.current.clear();
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
       e.stopPropagation();
@@ -178,8 +184,11 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
       const cy = (a.y + b.y) / 2;
       setView({ zoom, x: wx - (cx - rect.left) / zoom, y: wy - (cy - rect.top) / zoom });
     } else if (drag?.kind === "node") {
-      if (!drag.moved && Math.hypot(e.clientX - drag.clientX, e.clientY - drag.clientY) > TAP_SLOP)
+      // Ignore finger jitter during a tap: the state only follows once the pointer leaves the slop.
+      if (!drag.moved) {
+        if (Math.hypot(e.clientX - drag.clientX, e.clientY - drag.clientY) <= TAP_SLOP) return;
         setDrag({ ...drag, moved: true });
+      }
       const target = snapPoint({ x: p.x - drag.dx, y: p.y - drag.dy });
       const node = evaluated.nodeById.get(drag.id);
       if (node && (node.x !== target.x || node.y !== target.y))
@@ -221,6 +230,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
   const onCancel = (e: PointerEvent<SVGSVGElement>) => {
     pointers.current.delete(e.pointerId);
     setDrag(null);
+    if (e.pointerType !== "mouse") setCursor(null);
   };
 
   const zoomBy = (factor: number) =>
@@ -255,7 +265,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
         ref={svgRef}
         className={styles.canvas}
         data-mode={mode}
-        data-panning={drag?.kind === "pan"}
+        data-panning={(drag?.kind === "pan" && drag.moved) || drag?.kind === "pinch"}
         viewBox={`${view.x} ${view.y} ${viewW} ${viewH}`}
         onPointerDownCapture={onDownCapture}
         onPointerDown={onBackgroundDown}
