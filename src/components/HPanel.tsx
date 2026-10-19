@@ -22,7 +22,13 @@ interface HEdit {
   /** Graph and heuristic the result was computed for; the result is stale once they change. */
   resultKey: string | null;
   alt: number;
-  undo?: { before: Positions; after: Positions; wasSet: boolean };
+  /** After Apply: what to restore on Undo. */
+  undo?: {
+    positions?: { before: Positions; after: Positions };
+    /** The node's override before and after (null = none). */
+    override: { before: number | null; after: number | null };
+    wasSet: boolean;
+  };
 }
 
 export interface HTool {
@@ -39,6 +45,10 @@ export interface HTool {
   start: (nodeId: string, target: number) => void;
   setTarget: (target: number) => void;
   choose: (choice: HChoice) => void;
+  /** Set the target as an override of the heuristic's value, without moving anything. */
+  override: () => void;
+  /** Remove the state's override, so the heuristic's own value counts again. */
+  clearOverride: () => void;
   compute: (target?: number) => void;
   pickClosest: () => void;
   setAlt: (alt: number) => void;
@@ -63,7 +73,12 @@ export function useHTool(state: EditorState, dispatch: Dispatch<EditorAction>, m
   const stale = !!active?.result && active.resultKey !== key;
   const result = active?.phase === "result" && !stale ? active.result : null;
   const proposal = result?.ok ? (result.proposals[active!.alt] ?? null) : null;
-  const canUndo = active?.phase === "applied" && !!active.undo && positionsMatch(graph, active.undo.after);
+  const currentOverride = (id: string) => problem.hOverrides[id] ?? null;
+  const canUndo =
+    active?.phase === "applied" &&
+    !!active.undo &&
+    (!active.undo.positions || positionsMatch(graph, active.undo.positions.after)) &&
+    currentOverride(active.nodeId) === active.undo.override.after;
   const previewPositions = useMemo(
     () => (proposal && nodeId ? { [nodeId]: proposal.position } : undefined),
     [proposal, nodeId],
@@ -134,6 +149,18 @@ export function useHTool(state: EditorState, dispatch: Dispatch<EditorAction>, m
     close,
     setTarget: (target) => active && setEdit(active.phase === "result" ? run(active, target) : { ...active, target }),
     choose: (choice) => active && setEdit({ ...active, choice, phase: "choose", result: null }),
+    override: () => {
+      if (!active) return;
+      const before = currentOverride(active.nodeId);
+      dispatch({ type: "setHOverride", nodeId: active.nodeId, value: active.target });
+      setEdit({
+        ...active,
+        phase: "applied",
+        result: null,
+        undo: { override: { before, after: active.target }, wasSet: marks.hSet.has(active.nodeId) },
+      });
+    },
+    clearOverride: () => active && dispatch({ type: "setHOverride", nodeId: active.nodeId, value: null }),
     compute: (target) => active && setEdit(run(active, target)),
     pickClosest: () => {
       const res = active?.result;
@@ -147,14 +174,25 @@ export function useHTool(state: EditorState, dispatch: Dispatch<EditorAction>, m
       if (!active || !proposal || !previewPositions) return;
       const before = currentPositions(graph, previewPositions);
       dispatch({ type: "setPositions", positions: previewPositions });
+      // The heuristic now gives the target here, so an override would only hide it.
+      const overrideBefore = currentOverride(active.nodeId);
+      if (overrideBefore !== null) dispatch({ type: "setHOverride", nodeId: active.nodeId, value: null });
       const wasSet = marks.hSet.has(active.nodeId);
       markH(active.nodeId, true);
-      setEdit({ ...active, phase: "applied", result: null, undo: { before, after: previewPositions, wasSet } });
+      setEdit({
+        ...active,
+        phase: "applied",
+        result: null,
+        undo: { positions: { before, after: previewPositions }, override: { before: overrideBefore, after: null }, wasSet },
+      });
     },
     undo: () => {
       if (!active?.undo || !canUndo) return;
-      dispatch({ type: "setPositions", positions: active.undo.before });
-      if (!active.undo.wasSet) markH(active.nodeId, false);
+      const { positions, override, wasSet } = active.undo;
+      if (positions) dispatch({ type: "setPositions", positions: positions.before });
+      if (override.before !== override.after)
+        dispatch({ type: "setHOverride", nodeId: active.nodeId, value: override.before });
+      if (positions && !wasSet) markH(active.nodeId, false);
       setEdit({ ...active, phase: "choose", result: null, undo: undefined });
     },
   };
@@ -173,13 +211,17 @@ export default function HPanel({ tool, state, evaluated, heuristic }: Props) {
   if (!edit) return null;
   const node = evaluated.nodeById.get(edit.nodeId)!;
   const current = heuristic?.values[edit.nodeId];
+  const overridden = edit.nodeId in state.problem.hOverrides;
+  const computed = heuristic?.overridden[edit.nodeId];
   const h = `h(${node.name})`;
+  const show = (v: number | null | undefined) => (v === null || v === undefined ? "⚠" : formatNumber(v));
 
   if (edit.phase === "applied")
     return (
       <div className={styles.sectionBody}>
         <p className={styles.okText}>
-          {h} is now {current === null || current === undefined ? "⚠" : formatNumber(current)}.
+          {h} is now {show(current)}
+          {overridden ? ` (an override; the heuristic gives ${show(computed)})` : ""}.
         </p>
         <div className={styles.row}>
           {tool.canUndo && <button onClick={tool.undo}>Undo</button>}
@@ -222,10 +264,28 @@ export default function HPanel({ tool, state, evaluated, heuristic }: Props) {
         <NumberInput value={edit.target} min={0} step={0.1} aria-label="New h" onCommit={(v) => tool.setTarget(v)} />
       </div>
       <p className={styles.muted}>Heuristic: {heuristicLabel(state.problem)}</p>
+      {overridden && (
+        <div className={styles.row}>
+          <span className={styles.muted}>
+            {h} is overridden; the heuristic gives {show(computed)}.
+          </span>
+          <button onClick={tool.clearOverride}>Clear override</button>
+        </div>
+      )}
 
       {!result && (
         <>
-          <p className={styles.muted}>Keep the length of:</p>
+          <div className={styles.row}>
+            <button onClick={tool.override}>
+              Override: set {h} = {formatNumber(edit.target)}
+            </button>
+          </div>
+          <p className={styles.muted}>
+            Nothing moves; this value replaces what the heuristic computes for {node.name}.
+          </p>
+          <p className={styles.muted}>
+            <strong>Or move {node.name}</strong> until the heuristic gives {formatNumber(edit.target)}, keeping the length of:
+          </p>
           <ul className={styles.lockList} role="radiogroup" aria-label="Edge to keep">
             {options.map(([value, label]) => (
               <li key={value}>
@@ -250,19 +310,19 @@ export default function HPanel({ tool, state, evaluated, heuristic }: Props) {
           {tool.stale && <p className={styles.warnText}>The graph changed since the last result. Compute again.</p>}
           <div className={styles.row}>
             <button className="primary" onClick={() => tool.compute()}>
-              Compute
+              Compute move
             </button>
             <button onClick={tool.close}>Cancel</button>
           </div>
         </>
       )}
 
-      {result && <HResultView tool={tool} result={result} name={node.name} />}
+      {result && <HResultView tool={tool} result={result} name={node.name} target={edit.target} />}
     </div>
   );
 }
 
-function HResultView({ tool, result, name }: { tool: HTool; result: HResult; name: string }) {
+function HResultView({ tool, result, name, target }: { tool: HTool; result: HResult; name: string; target: number }) {
   const { edit, proposal } = tool;
   const buttons = (
     <div className={styles.row}>
@@ -294,11 +354,14 @@ function HResultView({ tool, result, name }: { tool: HTool; result: HResult; nam
     return (
       <>
         <p className={styles.error}>{message}</p>
-        {result.reason === "range" && result.closest && (
-          <div className={styles.row}>
+        <div className={styles.row}>
+          {result.reason === "range" && result.closest && (
             <button onClick={tool.pickClosest}>Use h = {formatNumber(result.closest.h)}</button>
-          </div>
-        )}
+          )}
+          <button onClick={tool.override}>
+            Override instead: h({name}) = {formatNumber(target)}
+          </button>
+        </div>
         {buttons}
       </>
     );

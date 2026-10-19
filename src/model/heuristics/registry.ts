@@ -83,8 +83,10 @@ export function lazyHeuristicContext(graph: StateSpaceGraph, problem: Problem): 
 }
 
 export interface HeuristicTable {
-  /** h(n) per node id; null where evaluation failed. */
+  /** h(n) per node id, after overrides; null where evaluation failed. */
   values: Record<string, number | null>;
+  /** For overridden nodes: what the heuristic itself computes (null if it fails). */
+  overridden: Record<string, number | null>;
   errors: Record<string, string>;
   /** Set when no table could be computed at all (no goal, unknown heuristic, compile error). */
   error?: string;
@@ -100,16 +102,24 @@ export function computeHeuristicTable(
   evaluated: EvaluatedGraph,
 ): HeuristicTable {
   const ctx = heuristicContext(graph, problem, evaluated);
-  if (!ctx) return { values: {}, errors: {}, error: "Choose a goal node to compute heuristic values." };
+  if (!ctx) return { values: {}, overridden: {}, errors: {}, error: "Choose a goal node to compute heuristic values." };
   const resolved = resolveHeuristic(problem.heuristic);
-  if (!resolved.ok) return { values: {}, errors: {}, error: resolved.error };
+  if (!resolved.ok) return { values: {}, overridden: {}, errors: {}, error: resolved.error };
 
   const values: Record<string, number | null> = {};
   const errors: Record<string, string> = {};
+  const overridden: Record<string, number | null> = {};
   for (const node of graph.nodes) {
     const r = evaluateNumber(() => resolved.heuristic.h(node, ctx));
+    const override = problem.hOverrides[node.id];
+    if (override !== undefined) {
+      // A value typed in by the user replaces the function's value (and any error it raised).
+      overridden[node.id] = r.ok ? r.value : null;
+      values[node.id] = override;
+      continue;
+    }
     values[node.id] = r.ok ? r.value : null;
     if (!r.ok) errors[node.id] = r.error;
   }
-  return { values, errors };
+  return { values, overridden, errors };
 }

@@ -30,7 +30,7 @@ function setup(heuristic: FunctionRef): { graph: StateSpaceGraph; problem: Probl
       ["C", "G"],
     ].map(([from, to]) => ({ id: from + to, from, to, directed: false, friction: 1 })),
   };
-  const problem: Problem = { version: 1, id: "p", name: "p", graphId: "t", initial: "A", goal: "G", heuristic, manualH: {} };
+  const problem: Problem = { version: 1, id: "p", name: "p", graphId: "t", initial: "A", goal: "G", heuristic, manualH: {}, hOverrides: {} };
   return { graph, problem };
 }
 

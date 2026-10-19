@@ -546,6 +546,18 @@
   line-height: 1.5;
 }
 
+.hValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.clearOverride {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 .lockList {
   margin: 0;
   padding: 0;

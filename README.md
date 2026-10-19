@@ -111,7 +111,13 @@ your own function, including functions that read costs from `ctx.actions`.
 - The result shows the rotation (e.g. “A rotates 24.7° clockwise about C, keeping A – C”), the changed edges, any
   other h values that change (custom heuristics may depend on other states), and alternatives with ◀ ▶.
   - If the value is out of reach, the panel shows the range h can take and offers the closest value.
-- Manual heuristics are edited directly. Zero, and the goal's own h, can't be changed by moving.
+- **Override instead:** the panel's first option just sets the value, without moving anything. It replaces whatever
+  the heuristic computes for that state. This works for every heuristic, and is the only option for the zero heuristic,
+  for the goal's own h, and where the heuristic fails.
+  - Overrides are saved in the problem's `hOverrides`, and the exported `derived.h` table includes them.
+  - They are marked ✎ in the h table and on the canvas. Click ✎× to use the heuristic's value again; typing into an
+    overridden value just changes the override.
+- Manual heuristics are edited directly, as before.
 - States whose h you set are marked in the h table. The length tool then keeps them in place by default and lists any
   h values its proposal would change.
 

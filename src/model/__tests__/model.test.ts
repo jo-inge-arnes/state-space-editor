@@ -31,6 +31,7 @@ function problem(overrides: Partial<Problem> = {}): Problem {
     goal: "c",
     heuristic: { kind: "builtin", id: "straight-line" },
     manualH: {},
+    hOverrides: {},
     ...overrides,
   };
 }
@@ -91,6 +92,27 @@ describe("heuristics", () => {
     expect(computeHeuristicTable(g, manual, ev).values).toEqual({ a: 2, b: 0, c: 0 });
     const user = problem({ heuristic: { kind: "user", name: "half", source: "return ctx.euclidean(node, ctx.goal) / 2;" } });
     expect(computeHeuristicTable(g, user, ev).values.a).toBeCloseTo(2.5);
+  });
+
+  it("lets typed-in values override any heuristic, including where it fails", () => {
+    const failsAtB = { kind: "user" as const, name: "f", source: 'if (node.id === "b") throw new Error("no"); return 1;' };
+    for (const heuristic of [problem().heuristic, failsAtB]) {
+      const t = computeHeuristicTable(g, problem({ heuristic, hOverrides: { a: 9, b: 2.5 } }), ev);
+      expect(t.values).toMatchObject({ a: 9, b: 2.5 });
+      expect(t.errors).toEqual({});
+    }
+    const t = computeHeuristicTable(g, problem({ hOverrides: { a: 9 } }), ev);
+    expect(t.overridden).toEqual({ a: expect.closeTo(5) });
+    // Overrides are part of the problem file and of its derived h table.
+    const doc = toProblemDocument(problem({ hOverrides: { a: 9 } }), g, { evaluated: ev });
+    expect(doc.derived?.h.a).toBe(9);
+    const back = parseProblem(JSON.parse(JSON.stringify(doc)));
+    expect(back.ok && back.value.problem.hOverrides).toEqual({ a: 9 });
+    // Older files without the field still load.
+    const old: Partial<typeof doc> = { ...doc };
+    delete old.hOverrides;
+    const parsedOld = parseProblem(old);
+    expect(parsedOld.ok && parsedOld.value.problem.hOverrides).toEqual({});
   });
 
   it("requires a goal", () => {

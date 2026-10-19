@@ -74,6 +74,8 @@ const problemFields = {
   heuristic: functionRefSchema,
   /** Per-node values used by the manual heuristic. */
   manualH: z.record(z.string(), z.number().finite()).default({}),
+  /** Per-node values that replace whatever the heuristic computes (for any heuristic). */
+  hOverrides: z.record(z.string(), z.number().finite()).default({}),
 };
 
 export const problemSchema = z.object(problemFields);

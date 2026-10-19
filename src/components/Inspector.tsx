@@ -164,6 +164,7 @@ function NodeInspector({
               nodeId={node.id}
               h={h}
               error={hErr}
+              computed={heuristic.overridden[node.id]}
               dispatch={dispatch}
               onRequestH={onRequestH}
             />

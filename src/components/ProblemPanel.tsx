@@ -121,6 +121,7 @@ export default function ProblemPanel({ state, dispatch, heuristic, onRequestH, h
                           nodeId={n.id}
                           h={h}
                           error={err}
+                          computed={heuristic.overridden[n.id]}
                           dispatch={dispatch}
                           onRequestH={onRequestH}
                         />
@@ -132,7 +133,8 @@ export default function ProblemPanel({ state, dispatch, heuristic, onRequestH, h
             </table>
             <p className={styles.muted}>
               h(n) is an estimate of the cost from n to the goal, in graph units.
-              {!isManual && " Type a new value to move the state until its h has that value."}
+              {!isManual &&
+                " Type a new value to override it, or to move the state until the heuristic gives that value. ✎ marks overrides; click it to use the heuristic again."}
             </p>
           </>
         )

@@ -35,6 +35,8 @@ export type EditorAction =
   | { type: "setCostModel"; ref: FunctionRef }
   | { type: "setProblem"; patch: Partial<Pick<Problem, "name" | "id" | "initial" | "goal" | "heuristic">> }
   | { type: "setManualH"; nodeId: string; value: number | null }
+  /** Replace the heuristic's value for one node (null removes the override). */
+  | { type: "setHOverride"; nodeId: string; value: number | null }
   | { type: "load"; graph: StateSpaceGraph; problem?: Problem; dirty?: boolean }
   | { type: "loadProblem"; problem: Problem }
   | { type: "markSaved" }
@@ -58,6 +60,7 @@ export function emptyProblem(graph: StateSpaceGraph): Problem {
     goal: null,
     heuristic: { kind: "builtin", id: "straight-line" },
     manualH: {},
+    hOverrides: {},
   };
 }
 
@@ -119,12 +122,14 @@ export function initialEditorState(graph: StateSpaceGraph, problem?: Problem): E
 function pruneProblem(problem: Problem, graph: StateSpaceGraph): Problem {
   const ids = new Set(graph.nodes.map((n) => n.id));
   const manualH = Object.fromEntries(Object.entries(problem.manualH).filter(([id]) => ids.has(id)));
+  const hOverrides = Object.fromEntries(Object.entries(problem.hOverrides).filter(([id]) => ids.has(id)));
   return {
     ...problem,
     graphId: graph.id,
     initial: problem.initial && ids.has(problem.initial) ? problem.initial : null,
     goal: problem.goal && ids.has(problem.goal) ? problem.goal : null,
     manualH,
+    hOverrides,
   };
 }
 
@@ -276,6 +281,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       if (action.value === null) delete manualH[action.nodeId];
       else manualH[action.nodeId] = action.value;
       return { ...state, problem: { ...state.problem, manualH }, dirty: true };
+    }
+    case "setHOverride": {
+      const hOverrides = { ...state.problem.hOverrides };
+      if (action.value === null) delete hOverrides[action.nodeId];
+      else hOverrides[action.nodeId] = action.value;
+      return { ...state, problem: { ...state.problem, hOverrides }, dirty: true };
     }
     case "load":
       return {

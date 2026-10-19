@@ -28,6 +28,17 @@ describe("editorReducer", () => {
     expect(s.dirty).toBe(true);
   });
 
+  it("sets and clears h overrides, and drops them with their node", () => {
+    let s = start();
+    s = editorReducer(s, { type: "setHOverride", nodeId: "n2", value: 1.5 });
+    s = editorReducer(s, { type: "setHOverride", nodeId: "n3", value: 4 });
+    expect(s.problem.hOverrides).toEqual({ n2: 1.5, n3: 4 });
+    s = editorReducer(s, { type: "setHOverride", nodeId: "n2", value: null });
+    expect(s.problem.hOverrides).toEqual({ n3: 4 });
+    s = editorReducer(s, { type: "deleteNode", id: "n3" });
+    expect(s.problem.hOverrides).toEqual({});
+  });
+
   it("does not duplicate edges between the same pair", () => {
     let s = start();
     const before = s.graph.edges.length;

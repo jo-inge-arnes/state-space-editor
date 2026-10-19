@@ -405,6 +405,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
               {showH && h !== undefined && (
                 <text className={`${styles.hLabel} ${h === null ? styles.hLabelBad : ""}`} y={R + (isGoal ? 24 : 18)} textAnchor="middle">
                   h={h === null ? "⚠" : formatNumber(h)}
+                  {problem.hOverrides[node.id] !== undefined && " ✎"}
                 </text>
               )}
             </g>

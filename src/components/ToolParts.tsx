@@ -9,14 +9,17 @@ import type { HChange } from "./tools";
 import styles from "./Editor.module.css";
 
 /**
- * h(n) as an editable value. Manual values are set directly; for every other heuristic a new value
- * opens the “Change h(n)” tool, which moves the state. Zero and the goal's own h are read-only.
+ * h(n) as an editable value. Manual values are set directly. For other heuristics a new value opens
+ * the “Change h(n)” tool, which can override the value or move the state; where moving can't help
+ * (zero heuristic, the goal itself, or a heuristic that fails there) the value becomes an override.
+ * Overridden values are marked ✎ with a button that restores the heuristic's own value.
  */
 export function HValueInput({
   problem,
   nodeId,
   h,
   error,
+  computed,
   dispatch,
   onRequestH,
 }: {
@@ -24,6 +27,8 @@ export function HValueInput({
   nodeId: string;
   h: number | null | undefined;
   error?: string;
+  /** What the heuristic itself gives, when the value is overridden (see HeuristicTable.overridden). */
+  computed?: number | null;
   dispatch: Dispatch<EditorAction>;
   onRequestH: (nodeId: string, h: number) => void;
 }) {
@@ -38,24 +43,38 @@ export function HValueInput({
         onCommit={(value) => dispatch({ type: "setManualH", nodeId, value })}
       />
     );
-  if (h === null || h === undefined)
-    return (
-      <span className={styles.error} title={error}>
-        ⚠ {error}
-      </span>
-    );
-  if ((ref.kind === "builtin" && ref.id === "zero") || problem.goal === nodeId) return <>{formatNumber(h)}</>;
+  const overridden = nodeId in problem.hOverrides;
+  const fixed = (ref.kind === "builtin" && ref.id === "zero") || problem.goal === nodeId;
+  const setOverride = (value: number | null) => dispatch({ type: "setHOverride", nodeId, value });
   return (
-    <NumberInput
-      value={h}
-      min={0}
-      step={0.1}
-      aria-label="h"
-      title="Type a new value to move the state until h has it"
-      onCommit={(v) => {
-        if (Math.abs(v - h) > 1e-9) onRequestH(nodeId, v);
-      }}
-    />
+    <span className={styles.hValue}>
+      <NumberInput
+        value={h ?? undefined}
+        min={0}
+        step={0.1}
+        aria-label="h"
+        placeholder={h === null ? "⚠" : undefined}
+        title={h === null ? error : "Type a value to override h or to move the state until h has it"}
+        onCommit={(v) => {
+          if (h !== null && h !== undefined && Math.abs(v - h) <= 1e-9) return;
+          if (fixed || overridden || h === null || h === undefined) setOverride(v);
+          else onRequestH(nodeId, v);
+        }}
+      />
+      {overridden && (
+        <button
+          className={styles.clearOverride}
+          title={`Overrides the heuristic (${computed === null || computed === undefined ? "⚠" : formatNumber(computed)}). Click to use the heuristic's value again.`}
+          aria-label="Clear override"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOverride(null);
+          }}
+        >
+          ✎×
+        </button>
+      )}
+    </span>
   );
 }
 
