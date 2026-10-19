@@ -33,6 +33,21 @@ type Drag =
 
 type Point = { x: number; y: number };
 
+/** The “Change length” tool's view of the canvas: lockable edges, and a preview of the new layout. */
+export interface CanvasOverlay {
+  phase: "locks" | "preview";
+  /** The edited edge (and its opposite one-way edge). */
+  targetEdgeIds: ReadonlySet<string>;
+  /** Edges whose length could change; clicking one toggles its lock. */
+  affected: ReadonlySet<string>;
+  locked: ReadonlySet<string>;
+  /** Edges whose length changes in the preview. */
+  changed?: ReadonlySet<string>;
+  /** Current positions of states that move in the preview (the canvas shows the new ones). */
+  ghosts?: { id: string; x: number; y: number }[];
+  onToggleLock: (edgeId: string) => void;
+}
+
 interface Props {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -41,9 +56,11 @@ interface Props {
   showH: boolean;
   snap: boolean;
   onRequestRename: (nodeId: string) => void;
+  /** While set, states can't be selected or dragged and edge clicks toggle locks. */
+  overlay?: CanvasOverlay;
 }
 
-export default function Canvas({ state, dispatch, evaluated, heuristic, showH, snap, onRequestRename }: Props) {
+export default function Canvas({ state, dispatch, evaluated, heuristic, showH, snap, onRequestRename, overlay }: Props) {
   const { graph, problem, selection, mode, pendingEdgeFrom } = state;
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -143,12 +160,18 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
     if (e.button !== 0 && e.button !== 1) return;
     // Empty canvas always pans when dragged; a plain tap/click does the current tool's action.
     const tap: TapAction =
-      e.button === 1 ? null : mode === "add-node" ? "add-node" : mode === "add-edge" ? "cancel-edge" : "deselect";
+      e.button === 1 || overlay
+        ? null
+        : mode === "add-node"
+          ? "add-node"
+          : mode === "add-edge"
+            ? "cancel-edge"
+            : "deselect";
     setDrag({ kind: "pan", clientX: e.clientX, clientY: e.clientY, view, moved: false, tap });
   };
 
   const onNodeDown = (e: PointerEvent, node: StateNode) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || overlay) return; // with an overlay the press pans the canvas instead
     e.stopPropagation();
     if (mode === "add-edge") {
       if (pendingEdgeFrom === null) dispatch({ type: "setPendingEdge", from: node.id });
@@ -162,6 +185,12 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
 
   const onEdgeDown = (e: PointerEvent, edge: Edge) => {
     if (e.button !== 0) return;
+    if (overlay) {
+      if (!overlay.affected.has(edge.id)) return;
+      e.stopPropagation();
+      overlay.onToggleLock(edge.id);
+      return;
+    }
     e.stopPropagation();
     if (mode === "add-edge") dispatch({ type: "setPendingEdge", from: null });
     dispatch({ type: "select", selection: { kind: "edge", id: edge.id } });
@@ -301,9 +330,22 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
             state={state}
             evaluated={evaluated}
             selected={selection?.kind === "edge" && selection.id === edge.id}
+            look={overlay && edgeLook(overlay, edge.id)}
             onPointerDown={(e) => onEdgeDown(e, edge)}
           />
         ))}
+
+        {overlay?.ghosts?.map((ghost) => {
+          const now = evaluated.nodeById.get(ghost.id);
+          return (
+            now && (
+              <g key={`ghost-${ghost.id}`} className={styles.ghost}>
+                <line x1={ghost.x} y1={ghost.y} x2={now.x} y2={now.y} />
+                <circle cx={ghost.x} cy={ghost.y} r={R} />
+              </g>
+            )
+          );
+        })}
 
         {pending && cursor && (
           <line className={styles.rubberBand} x1={pending.x} y1={pending.y} x2={cursor.x} y2={cursor.y} />
@@ -321,7 +363,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
               className={classes.filter(Boolean).join(" ")}
               transform={`translate(${node.x} ${node.y})`}
               onPointerDown={(e) => onNodeDown(e, node)}
-              onDoubleClick={() => onRequestRename(node.id)}
+              onDoubleClick={() => !overlay && onRequestRename(node.id)}
             >
               <title>{node.name}</title>
               {isInitial && <circle r={R + 5} className={styles.ringInitial} />}
@@ -356,7 +398,7 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
         })}
       </svg>
 
-      <div className={styles.hint}>{hintFor(state, coarse)}</div>
+      <div className={styles.hint}>{overlay ? overlayHint(overlay, coarse) : hintFor(state, coarse)}</div>
 
       <div className={styles.overlay}>
         <div>
@@ -380,17 +422,28 @@ export default function Canvas({ state, dispatch, evaluated, heuristic, showH, s
   );
 }
 
+type EdgeLook = "target" | "locked" | "changed" | "lockable" | "dim";
+
+function edgeLook(overlay: CanvasOverlay, id: string): EdgeLook {
+  if (overlay.targetEdgeIds.has(id)) return "target";
+  if (overlay.changed?.has(id)) return "changed";
+  if (overlay.locked.has(id)) return "locked";
+  return overlay.affected.has(id) ? "lockable" : "dim";
+}
+
 function EdgeView({
   edge,
   state,
   evaluated,
   selected,
+  look,
   onPointerDown,
 }: {
   edge: Edge;
   state: EditorState;
   evaluated: EvaluatedGraph;
   selected: boolean;
+  look?: EdgeLook;
   onPointerDown: (e: PointerEvent) => void;
 }) {
   const a = evaluated.nodeById.get(edge.from);
@@ -418,7 +471,9 @@ function EdgeView({
 
   const friction = state.graph.costModel.kind === "builtin" && state.graph.costModel.id === "euclidean" && edge.friction > 1;
   const error = info.forward.error ?? info.backward?.error;
-  const label = error ? "⚠" : edgeLabel(info.forward.cost, info.backward?.cost) + (friction ? ` ×${formatNumber(edge.friction)}` : "");
+  const label =
+    (look === "locked" ? "🔒 " : "") +
+    (error ? "⚠" : edgeLabel(info.forward.cost, info.backward?.cost) + (friction ? ` ×${formatNumber(edge.friction)}` : ""));
   // Horizontal text next to a steep edge needs to clear half its width.
   const halfWidth = label.length * 3.6;
   const labelOff = off + 10 + halfWidth * Math.abs(uy) + 4 * Math.abs(ux);
@@ -428,7 +483,8 @@ function EdgeView({
   const ly = (a.y + b.y) / 2 + py * labelOff * flip;
 
   const markerId = error ? "arrowError" : selected ? "arrowSelected" : "arrow";
-  const classes = [selected && styles.edgeSelected, error && styles.edgeError].filter(Boolean).join(" ");
+  const lookClass = look && { target: styles.edgeTarget, locked: styles.edgeLocked, changed: styles.edgeChanged, lockable: styles.edgeLockable, dim: styles.edgeDim }[look];
+  const classes = [selected && !look && styles.edgeSelected, error && styles.edgeError, lookClass].filter(Boolean).join(" ");
   const fromName = a.name;
   const toName = b.name;
 
@@ -466,6 +522,11 @@ function edgeLabel(forward: number | null, backward: number | null | undefined):
   if (backward === undefined) return f;
   if (backward !== null && forward !== null && Math.abs(backward - forward) < 1e-9) return f;
   return `${f} / ${backward === null ? "?" : formatNumber(backward)}`;
+}
+
+function overlayHint(overlay: CanvasOverlay, touch: boolean): string {
+  if (overlay.phase === "preview") return "Preview · dashed circles are the current positions";
+  return `${touch ? "Tap" : "Click"} highlighted edges to lock or unlock their length`;
 }
 
 function hintFor(state: EditorState, touch: boolean): string {

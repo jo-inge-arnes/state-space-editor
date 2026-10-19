@@ -164,11 +164,6 @@
     text-overflow: ellipsis;
   }
 
-  .hint {
-    max-width: calc(100% - 24px);
-    white-space: normal;
-    text-align: center;
-  }
   .overlay {
     bottom: 54px;
   }
@@ -251,6 +246,50 @@
 }
 .arrowError {
   fill: var(--danger);
+}
+
+/* “Change length” overlay */
+.edgeTarget .edgeLine {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+.edgeLockable {
+  cursor: pointer;
+}
+.edgeLockable .edgeLine {
+  stroke-width: 3;
+}
+.edgeLocked {
+  cursor: pointer;
+}
+.edgeLocked .edgeLine {
+  stroke: var(--text);
+  stroke-width: 4;
+}
+.edgeChanged .edgeLine {
+  stroke: var(--warn);
+  stroke-width: 3;
+}
+.edgeChanged .edgeLabel {
+  fill: var(--warn);
+}
+.edgeDim {
+  opacity: 0.3;
+}
+.ghost {
+  pointer-events: none;
+}
+.ghost circle {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+.ghost line {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 4;
 }
 
 .edgeLabel {
@@ -485,6 +524,41 @@
   color: var(--muted);
 }
 
+.plainList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lockList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lockList .toggle {
+  width: 100%;
+  color: var(--text);
+}
+.lockLength {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.badge {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .fileList {
   margin: 0;
   padding: 0;
@@ -513,9 +587,15 @@
   margin: 0;
 }
 
-/* After the base .canvasWrap rule so it wins: the bottom sheet sits below the canvas and takes the bottom inset. */
+/* After the base rules so these win on narrow screens. */
 @media (max-width: 860px) {
+  /* The bottom sheet sits below the canvas and takes the bottom inset. */
   .canvasWrap {
     --inset-bottom: 0px;
+  }
+  .hint {
+    max-width: calc(100% - 24px);
+    white-space: normal;
+    text-align: center;
   }
 }

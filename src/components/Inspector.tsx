@@ -17,6 +17,8 @@ interface Props {
   /** Node whose name field should get focus (set by double-clicking a node). */
   renameRequest: string | null;
   onRenameHandled: () => void;
+  /** Open the “Change length” tool for an edge with a new target length (units). */
+  onRequestLength: (edgeId: string, length: number) => void;
 }
 
 export default function Inspector(props: Props) {
@@ -31,7 +33,17 @@ export default function Inspector(props: Props) {
   }
   if (selection?.kind === "edge") {
     const edge = graph.edges.find((e) => e.id === selection.id);
-    if (edge) return <EdgeInspector key={edge.id} edge={edge} state={state} dispatch={dispatch} evaluated={evaluated} />;
+    if (edge)
+      return (
+        <EdgeInspector
+          key={edge.id}
+          edge={edge}
+          state={state}
+          dispatch={dispatch}
+          evaluated={evaluated}
+          onRequestLength={props.onRequestLength}
+        />
+      );
   }
   return (
     <div className={styles.sectionBody}>
@@ -167,11 +179,13 @@ function EdgeInspector({
   state,
   dispatch,
   evaluated,
+  onRequestLength,
 }: {
   edge: Edge;
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
   evaluated: EvaluatedGraph;
+  onRequestLength: (edgeId: string, length: number) => void;
 }) {
   const { graph } = state;
   const from = evaluated.nodeById.get(edge.from)!;
@@ -229,8 +243,18 @@ function EdgeInspector({
         <table className={styles.table}>
           <tbody>
             <tr>
-              <th>Length</th>
-              <td className={styles.num}>{formatNumber(info.length)} units</td>
+              <th>Length (units)</th>
+              <td className={styles.num}>
+                <NumberInput
+                  value={info.length}
+                  min={0.0001}
+                  step={0.1}
+                  aria-label="Length"
+                  onCommit={(v) => {
+                    if (v > 0 && Math.abs(v - info.length) > 1e-9) onRequestLength(edge.id, v);
+                  }}
+                />
+              </td>
             </tr>
             <ActionRow label={`c(${from.name}, ${info.forward.name})`} cost={info.forward.cost} error={info.forward.error} />
             {info.backward && (
@@ -239,6 +263,9 @@ function EdgeInspector({
           </tbody>
         </table>
       )}
+      <p className={styles.muted}>
+        Enter a new length to move states so that as few other edges as possible change.
+      </p>
       <div className={styles.row}>
         <button className="danger" onClick={() => dispatch({ type: "deleteEdge", id: edge.id })}>
           Delete edge

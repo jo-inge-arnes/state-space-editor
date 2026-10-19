@@ -17,6 +17,17 @@ describe("editorReducer", () => {
     ]);
   });
 
+  it("moves several nodes at once", () => {
+    let s = start();
+    s = editorReducer(s, { type: "setPositions", positions: { n1: { x: 1, y: 2 }, n3: { x: 3, y: 4 } } });
+    expect(s.graph.nodes.filter((n) => n.id === "n1" || n.id === "n3").map((n) => [n.x, n.y])).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    expect(s.graph.nodes.find((n) => n.id === "n2")).toMatchObject({ x: 320, y: 140 });
+    expect(s.dirty).toBe(true);
+  });
+
   it("does not duplicate edges between the same pair", () => {
     let s = start();
     const before = s.graph.edges.length;

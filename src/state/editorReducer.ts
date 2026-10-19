@@ -19,6 +19,8 @@ export interface EditorState {
 export type EditorAction =
   | { type: "addNode"; x: number; y: number }
   | { type: "moveNode"; id: string; x: number; y: number }
+  /** Move several nodes at once (e.g. an edge-length adjustment). */
+  | { type: "setPositions"; positions: Record<string, { x: number; y: number }> }
   | { type: "renameNode"; id: string; name: string }
   | { type: "deleteNode"; id: string }
   | { type: "addEdge"; from: string; to: string }
@@ -163,6 +165,14 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return withGraph(state, {
         ...graph,
         nodes: graph.nodes.map((n) => (n.id === action.id ? { ...n, x: action.x, y: action.y } : n)),
+      });
+    case "setPositions":
+      return withGraph(state, {
+        ...graph,
+        nodes: graph.nodes.map((n) => {
+          const p = action.positions[n.id];
+          return p ? { ...n, x: p.x, y: p.y } : n;
+        }),
       });
     case "renameNode": {
       const name = action.name.trim();

@@ -57,6 +57,45 @@ On phones and tablets the side panel becomes a bottom sheet (tap its bar to open
 state to move it, drag empty canvas to pan (in every tool), pinch to zoom, tap with **+State** / **+Action** to add,
 and double-tap a state to rename it.
 
+## Changing an edge's length
+
+Select an edge and type a new **Length**. The editor then moves states so that **as few other edges as possible
+change length**:
+
+1. **Lock edges first.** The panel lists the edges that could be affected (the other edges in the edited edge's
+   biconnected block, nearest first). Tick the ones that must keep their length, or click them on the canvas. Choices
+   are remembered for the session, and edges whose length you set earlier start out locked.
+2. **Compute.** The result shows which other edges change, which states move and how (e.g. “A rotates 11.2° clockwise
+   about C”). The canvas previews the new layout, with dashed circles at the current positions. Browse the alternatives
+   with ◀ ▶: fewest moved states first, then a least-total-movement layout.
+3. **Apply** (and **Undo** if needed).
+
+If locked edges make the change impossible, the panel names them. If the length is out of reach (e.g. longer than a
+fully stretched chain), the panel offers the closest reachable length.
+
+How it works (`src/model/layout/`):
+
+- **Localise** (`structure.ts`): only edges in the edited edge's biconnected block can need to change. Everything else
+  hangs off a single state and follows along rigidly.
+- **Fewest changed edges** (`pebbleGame.ts`, `release.ts`):
+  - By Laman's theorem for 2D generic rigidity, an edge's length can change while a set of other edges keep theirs iff
+    it is independent of them in the rigidity matroid. This covers every length-preserving motion: rotation about a
+    neighbour, rigid rotation or translation of a group, and linkage flexes.
+  - The *release set* (edges allowed to change) is therefore a minimum hitting set of the circuits through the edge.
+  - It is found by iterative deepening, branching on the rigid region reported by a failed (2,3) pebble-game test
+    (Jacobs & Hendrickson). Each candidate is checked incrementally: clone, remove the released bars, and re-insert
+    the redundant ones.
+  - With a time budget, it falls back to a greedy choice and is flagged as not proven minimal.
+- **Fewest moved states** (`movers.ts`, `solver.ts`):
+  - From each end of the edge, a set of moving states grows by adding the neighbour that adds the most freedom. Once
+    the rigidity matrix at generic positions says the length is free, the solver tries the motion.
+  - The solver is a damped Gauss–Newton continuation with minimum-norm steps. It steps the target length and follows
+    the continuous motion instead of flipping to a mirror image.
+  - If the solver stops short (out of range), the set grows. If every candidate is out of range, the most resisting
+    edge is released.
+
+Typical graphs take a few milliseconds; the panel shows the time and the number of rigidity tests.
+
 ## JSON files
 
 Graph and problem files contain the core data plus a `derived` block computed by the editor, for search code to read
@@ -91,6 +130,7 @@ Everything (UI, export) goes through `computeHeuristicTable` / `evaluateGraph`, 
 
 ```
 src/model/        schema (zod), geometry, cost models, heuristics, actions, serialization
+src/model/layout/ edge-length adjustment: blocks, pebble game, release search, solver
 src/state/        editor reducer
 src/components/   client components: Canvas (SVG), Inspector, panels, FunctionEditor
 src/server/       storage (server-only): file-system and Vercel Blob backends

@@ -10,6 +10,7 @@ import { editorReducer, initialEditorState, sampleState, type EditorState } from
 import Canvas from "./Canvas";
 import CostModelPanel from "./CostModelPanel";
 import Inspector from "./Inspector";
+import LengthPanel, { useLengthTool } from "./LengthPanel";
 import ProblemPanel from "./ProblemPanel";
 import StoragePanel from "./StoragePanel";
 import Toolbar from "./Toolbar";
@@ -72,11 +73,20 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
     return () => clearTimeout(t);
   }, [state.graph, state.problem, state.dirty, restored]);
 
+  const lengthTool = useLengthTool(state, dispatch);
+  const lengthActive = !!lengthTool.overlay;
+  const closeLength = lengthTool.close;
+
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTextEntry(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
+      if (lengthActive) {
+        // The canvas belongs to the length tool; only Esc (cancel) applies.
+        if (k === "escape") closeLength();
+        return;
+      }
       if (k === "v") dispatch({ type: "setMode", mode: "select" });
       else if (k === "n") dispatch({ type: "setMode", mode: "add-node" });
       else if (k === "e") dispatch({ type: "setMode", mode: "add-edge" });
@@ -90,7 +100,7 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [lengthActive, closeLength]);
 
   const evaluated = useMemo(() => evaluateGraph(state.graph), [state.graph]);
   const heuristic = useMemo(
@@ -108,21 +118,37 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
   }, []);
   const onRenameHandled = useCallback(() => setRenameRequest(null), []);
 
+  // The canvas shows the length tool's proposal (new positions, costs and h) before it is applied.
+  const preview = lengthTool.proposal?.positions;
+  const display = useMemo(() => {
+    if (!preview) return { state, evaluated, heuristic };
+    const graph = { ...state.graph, nodes: state.graph.nodes.map((n) => (preview[n.id] ? { ...n, ...preview[n.id] } : n)) };
+    const ev = evaluateGraph(graph);
+    return {
+      state: { ...state, graph },
+      evaluated: ev,
+      heuristic: graph.nodes.length ? computeHeuristicTable(graph, state.problem, ev) : null,
+    };
+  }, [preview, state, evaluated, heuristic]);
+
   const shared = { state, dispatch, evaluated };
   const selectionTitle =
     state.selection?.kind === "node" ? "State" : state.selection?.kind === "edge" ? "Action (edge)" : "Selection";
-  const selectionSummary = summarize(state);
+  const selectionSummary = lengthTool.title ?? summarize(state);
 
   return (
     <div className={styles.shell}>
       <Toolbar state={state} dispatch={dispatch} showH={showH} setShowH={setShowH} snap={snap} setSnap={setSnap} />
       <div className={styles.main}>
         <Canvas
-          {...shared}
-          heuristic={heuristic}
+          state={display.state}
+          dispatch={dispatch}
+          evaluated={display.evaluated}
+          heuristic={display.heuristic}
           showH={showH}
           snap={snap}
           onRequestRename={onRequestRename}
+          overlay={lengthTool.overlay}
         />
         <aside className={styles.sidebar} data-open={sheetOpen}>
           <button
@@ -136,12 +162,18 @@ export default function Editor({ initialGraph, initialProblem, loadError }: Prop
             <span aria-hidden>{sheetOpen ? "▾" : "▴"}</span>
           </button>
           {loadError && <p className={styles.error} style={{ padding: "10px 14px" }}>{loadError}</p>}
+          {lengthTool.edit && (
+            <Section title="Change length">
+              <LengthPanel tool={lengthTool} state={state} evaluated={evaluated} />
+            </Section>
+          )}
           <Section title={selectionTitle}>
             <Inspector
               {...shared}
               heuristic={heuristic}
               renameRequest={renameRequest}
               onRenameHandled={onRenameHandled}
+              onRequestLength={lengthTool.start}
             />
           </Section>
           <Section title="Problem & heuristic">
